@@ -34,7 +34,8 @@ export interface MissionUi {
  * 创建任务界面（简报 / 任务 HUD / 结算）
  *
  * 功能：在 HUD 根容器内构建三块任务相关 DOM——
- * 1) 全屏任务简报：任务名 + 逐段叙事 + 开始按钮（点击后回调）；
+ * 1) 全屏任务简报：任务名 + 打字机逐段叙事 + 各阶段目标简报列表 +
+ *    开始按钮（打字未完时点击=跳过打字，完成后点击=开始任务）；
  * 2) 顶部任务 HUD：阶段标题 + 目标进度行 + 任务总倒计时（右上角）；
  * 3) 全屏结算界面：胜负标题 + 失败原因 + 得分/评价/击坠/用时统计
  *    + 重开按钮。
@@ -55,12 +56,40 @@ export function createMissionUi(root: HTMLElement): MissionUi {
   briefingTitle.className = 'mission-card-title';
   briefingTitle.textContent = missionCfg.name;
   briefingCard.appendChild(briefingTitle);
-  for (const paragraph of missionCfg.briefing) {
+
+  // 叙事段落（打字机逐字填充）
+  const briefingLines: HTMLElement[] = [];
+  for (const _paragraph of missionCfg.briefing) {
     const line = document.createElement('p');
     line.className = 'mission-briefing-line';
-    line.textContent = paragraph;
     briefingCard.appendChild(line);
+    briefingLines.push(line);
   }
+
+  // 目标简报列表（叙事完成后淡入）
+  const objectivesBlock = document.createElement('div');
+  objectivesBlock.className = 'mission-briefing-objectives';
+  const objectivesTitle = document.createElement('div');
+  objectivesTitle.className = 'mission-briefing-objectives-title';
+  objectivesTitle.textContent = '— 作战目标 —';
+  objectivesBlock.appendChild(objectivesTitle);
+  for (const phase of missionCfg.phases) {
+    const phaseRow = document.createElement('div');
+    phaseRow.className = 'mission-briefing-phase';
+    const phaseName = document.createElement('span');
+    phaseName.className = 'mission-briefing-phase-name';
+    phaseName.textContent = phase.title.replace(/^阶段[一二三]：/, '');
+    phaseRow.appendChild(phaseName);
+    const phaseGoals = document.createElement('span');
+    phaseGoals.className = 'mission-briefing-phase-goals';
+    phaseGoals.textContent = phase.objectives
+      .map((o) => `${OBJECTIVE_LABELS[o.type] ?? o.type} ×${o.count}`)
+      .join(' / ');
+    phaseRow.appendChild(phaseGoals);
+    objectivesBlock.appendChild(phaseRow);
+  }
+  briefingCard.appendChild(objectivesBlock);
+
   const briefingHint = document.createElement('div');
   briefingHint.className = 'mission-briefing-hint';
   briefingHint.textContent = '起飞准备就绪 · 点击开始任务后推满油门（W）滑跑起飞';
@@ -68,10 +97,15 @@ export function createMissionUi(root: HTMLElement): MissionUi {
   const startButton = document.createElement('button');
   startButton.className = 'mission-button';
   startButton.type = 'button';
-  startButton.textContent = '开始任务';
+  startButton.textContent = '跳过';
   briefingCard.appendChild(startButton);
   briefingOverlay.appendChild(briefingCard);
   root.appendChild(briefingOverlay);
+
+  /** 打字机定时器句柄（简报关闭时清理） */
+  let typewriterTimer: ReturnType<typeof setInterval> | null = null;
+  /** 打字是否已全部完成 */
+  let briefingTypingDone = false;
 
   // ---- 任务 HUD：顶部阶段目标 + 右上倒计时 ----
   const hud = document.createElement('div');
@@ -115,12 +149,63 @@ export function createMissionUi(root: HTMLElement): MissionUi {
 
   return {
     /**
-     * 显示任务简报
+     * 显示任务简报（打字机叙事）
      *
-     * @param onStart 玩家点击开始按钮后的回调
+     * 功能：显示简报并启动打字机逐字填充叙事段落（每 26ms 一字）；
+     * 全部打完后目标简报区块淡入、按钮变为"开始任务"。
+     * 按钮点击行为：打字未完→立即补全全部文字；
+     * 打字已完成→关闭简报并触发 onStart 回调
+     * @param onStart 玩家确认开始后的回调
+     * @returns void
+     * 异常：无
+     * 注意事项：打字机定时器在简报关闭时清理，防泄漏；
+     * 重开任务为整页刷新，简报只会播放一次
      */
     showBriefing(onStart: () => void): void {
+      // 重置打字状态
+      briefingTypingDone = false;
+      startButton.textContent = '跳过';
+      objectivesBlock.classList.remove('is-visible');
+      for (const line of briefingLines) {
+        line.textContent = '';
+      }
+
+      let paragraphIndex = 0;
+      let charIndex = 0;
+      const finishTyping = (): void => {
+        if (typewriterTimer !== null) {
+          clearInterval(typewriterTimer);
+          typewriterTimer = null;
+        }
+        // 补全全部文字并展示目标区块
+        missionCfg.briefing.forEach((paragraph, i) => {
+          briefingLines[i]!.textContent = paragraph;
+        });
+        objectivesBlock.classList.add('is-visible');
+        startButton.textContent = '开始任务';
+        briefingTypingDone = true;
+      };
+
+      typewriterTimer = setInterval((): void => {
+        if (paragraphIndex >= missionCfg.briefing.length) {
+          finishTyping();
+          return;
+        }
+        const paragraph = missionCfg.briefing[paragraphIndex]!;
+        if (charIndex < paragraph.length) {
+          charIndex += 1;
+          briefingLines[paragraphIndex]!.textContent = paragraph.slice(0, charIndex);
+        } else {
+          paragraphIndex += 1;
+          charIndex = 0;
+        }
+      }, 26);
+
       const handler = (): void => {
+        if (!briefingTypingDone) {
+          finishTyping();
+          return;
+        }
         startButton.removeEventListener('click', handler);
         briefingOverlay.classList.remove('is-visible');
         onStart();
@@ -131,8 +216,15 @@ export function createMissionUi(root: HTMLElement): MissionUi {
 
     /**
      * 隐藏简报界面
+     *
+     * 功能：关闭简报并清理打字机定时器
+     * @returns void
      */
     hideBriefing(): void {
+      if (typewriterTimer !== null) {
+        clearInterval(typewriterTimer);
+        typewriterTimer = null;
+      }
       briefingOverlay.classList.remove('is-visible');
     },
 

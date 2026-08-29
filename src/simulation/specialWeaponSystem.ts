@@ -237,6 +237,7 @@ function spawnSpecialMissile(
   pushEvent: (event: GameEvent) => void,
 ): void {
   _forward.set(0, 0, -1).applyQuaternion(player.quaternion);
+  _down.set(0, -1, 0).applyQuaternion(player.quaternion);
   _spawnPos.copy(player.position).addScaledVector(_forward, 5).addScaledVector(_down, 2.5);
   _spawnVelocity.copy(player.velocity).addScaledVector(_forward, missileCfg.launchSpeed);
 

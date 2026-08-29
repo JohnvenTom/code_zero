@@ -17,8 +17,12 @@ import { gameConfig } from '../../config';
 export interface SceneBundle {
   /** 场景实例 */
   scene: Scene;
-  /** 平行光（日光）引用，供后续昼夜系统调节 */
+  /** 平行光（日光）引用，供昼夜系统调节 */
   sunLight: DirectionalLight;
+  /** 半球环境光引用，供昼夜系统调节 */
+  hemiLight: HemisphereLight;
+  /** 天空穹顶网格引用，供昼夜系统整体调色 */
+  skyDome: Mesh;
 }
 
 /**
@@ -93,15 +97,16 @@ export function createScene(): SceneBundle {
 
   const skyCfg = gameConfig.sky;
   scene.fog = new Fog(skyCfg.fogColor, skyCfg.fogNear, skyCfg.fogFar);
-  scene.add(createSkyDome());
+  const skyDome = createSkyDome();
+  scene.add(skyDome);
 
   const lightCfg = gameConfig.lighting;
-  const hemi = new HemisphereLight(
+  const hemiLight = new HemisphereLight(
     lightCfg.hemiSkyColor,
     lightCfg.hemiGroundColor,
     lightCfg.hemiIntensity,
   );
-  scene.add(hemi);
+  scene.add(hemiLight);
 
   const ambient = new AmbientLight(0xffffff, 0.25);
   scene.add(ambient);
@@ -111,5 +116,5 @@ export function createScene(): SceneBundle {
   sunLight.position.set(x, y, z);
   scene.add(sunLight);
 
-  return { scene, sunLight };
+  return { scene, sunLight, hemiLight, skyDome };
 }

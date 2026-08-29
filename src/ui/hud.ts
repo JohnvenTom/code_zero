@@ -493,6 +493,8 @@ function updateLockBox(
 ): void {
   if (lock === null || lock.state === 'none' || !lock.onScreen) {
     lockBox.classList.remove('is-locking', 'is-locked');
+    // 清空文案，避免下次锁定框重现瞬间闪现旧文本（如 LOCKED → LOCK 0%）
+    lockLabel.textContent = '';
     return;
   }
   lockBox.style.left = `${lock.screenX.toFixed(0)}px`;

@@ -20,7 +20,8 @@ import { createHangarUi, type HangarUi } from './ui';
  * 返回值：void
  * @throws 容器元素缺失或 WebGL 初始化失败时抛出/向上冒泡异常
  * 注意事项：本函数是唯一的层间装配点，各层内部不互相直接引用；
- * 玩家实体在机库选择完成后才生成（机型决定属性/武器装配）
+ * 玩家实体在机库选择完成后才生成（机型决定属性/武器装配）；
+ * 模拟事件每帧取出后同时分发给 HUD 与渲染层战斗特效
  */
 function bootstrap(): void {
   // ---- core 层：键盘输入管理器（DOM → 纯数据输入快照） ----
@@ -92,6 +93,10 @@ function bootstrap(): void {
         }
       }
 
+      // 模拟事件：一次取出，HUD 与战斗特效共享消费
+      const events = world.consumeEvents();
+      renderApp.handleEvents(events);
+
       hud.update({
         fps: perf.fps,
         frameMs: perf.averageFrameMs,
@@ -99,7 +104,7 @@ function bootstrap(): void {
         entityCount: world.getEntities().length,
         flight,
         lock,
-        events: world.consumeEvents(),
+        events,
       });
 
       // 任务 HUD：阶段目标进度 + 总倒计时

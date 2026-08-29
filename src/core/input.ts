@@ -1,12 +1,17 @@
 import { gameConfig } from '../config';
 import type { ControlInput } from '../simulation';
 
+/** 推杆（低头）灵敏度系数（手感调优：拉杆全量、推杆略柔） */
+const PUSH_SENSITIVITY = 0.8;
+
 /**
  * 键盘输入管理器
  *
  * 功能：监听窗口键盘事件，将按键状态维护为按下集合与一次性动作队列
  * （导弹/干扰弹/重置为边沿触发），按 simulation 层定义的 ControlInput
- * 结构输出纯数据快照，供固定步模拟采样；窗口失焦时自动清空避免按键卡死。
+ * 结构输出纯数据快照，供固定步模拟采样；俯仰输入不对称调优
+ * （拉杆全量、推杆 0.8 倍，符合街机空战"抬头快低头柔"手感）；
+ * 窗口失焦时自动清空避免按键卡死。
  * 边界约定：本类属于 core 层的 DOM 桥接件，只产生纯数据，
  * 不包含任何游戏规则；键位与灵敏度均来自配置表。
  */
@@ -74,9 +79,12 @@ export class InputManager {
    */
   sample(): ControlInput {
     const keys = this.keys;
-    const pitch = (this.isDown(keys.pitchPull) ? 1 : 0) + (this.isDown(keys.pitchPush) ? -1 : 0);
+    const rawPitch = (this.isDown(keys.pitchPull) ? 1 : 0) + (this.isDown(keys.pitchPush) ? -1 : 0);
     const roll = (this.isDown(keys.rollRight) ? 1 : 0) + (this.isDown(keys.rollLeft) ? -1 : 0);
     const yaw = (this.isDown(keys.yawRight) ? 1 : 0) + (this.isDown(keys.yawLeft) ? -1 : 0);
+    // 俯仰不对称：拉杆（抬头）保持全量，推杆（低头）衰减——
+    // 街机空战手感（抬头跟手、俯冲可控）
+    const pitch = rawPitch > 0 ? rawPitch : rawPitch * PUSH_SENSITIVITY;
     const fire = keys.fire.some((code) => this.pressed.has(code));
     const missile = this.pendingMissile;
     const flare = this.pendingFlare;
