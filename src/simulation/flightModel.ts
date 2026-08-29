@@ -1,0 +1,226 @@
+import { Euler, Quaternion, Vector3 } from 'three';
+import { gameConfig } from '../config';
+import type { SimEntity } from './entity';
+
+/**
+ * 战机控制输入快照（玩家由 core 层 InputManager 采样生成，敌机由 AI 生成）
+ *
+ * 功能：承载一个固定步内一架战机的全部控制输入；
+ * simulation 层只依赖本结构，不接触任何 DOM/键盘事件。
+ */
+export interface ControlInput {
+  /** 俯仰杆量 -1..1（+1 拉杆抬头 / -1 推杆低头） */
+  readonly pitch: number;
+  /** 滚转杆量 -1..1（+1 右滚） */
+  readonly roll: number;
+  /** 偏航量 -1..1（+1 机头右偏） */
+  readonly yaw: number;
+  /** 是否按住油门增大键 */
+  readonly throttleUp: boolean;
+  /** 是否按住油门减小键 */
+  readonly throttleDown: boolean;
+  /** 是否按住机炮开火键 */
+  readonly fire: boolean;
+  /** 是否请求发射导弹（边沿触发，仅单个固定步为 true） */
+  readonly missile: boolean;
+  /** 是否请求释放干扰弹（边沿触发，仅单个固定步为 true） */
+  readonly flare: boolean;
+  /** 是否请求发射特殊武器（边沿触发，仅单个固定步为 true） */
+  readonly special: boolean;
+  /** 是否请求切换特殊武器（边沿触发，仅单个固定步为 true） */
+  readonly cycleSpecial: boolean;
+  /** 是否请求循环僚机指令（边沿触发，仅单个固定步为 true；仅玩家使用） */
+  readonly wingmanCommand: boolean;
+  /** 是否请求重置（边沿触发，仅单个固定步为 true；仅玩家使用） */
+  readonly reset: boolean;
+}
+
+/** 飞行基准配置的模块级引用（通用参数：油门速率/输入响应/失速特性/地面参数） */
+const cfg = gameConfig.flight;
+
+/** 模块级复用对象：局部角增量欧拉角（避免每步分配） */
+const _euler = new Euler();
+/** 模块级复用对象：局部角增量四元数 */
+const _deltaQ = new Quaternion();
+/** 模块级复用对象：机头前向向量（世界坐标） */
+const _forward = new Vector3();
+/** 模块级复用对象：机体上方向向量（世界坐标） */
+const _up = new Vector3();
+/** 模块级复用对象：机体局部 X 轴（俯仰轴） */
+const _pitchAxis = new Vector3(1, 0, 0);
+
+/**
+ * 将数值钳制到区间内
+ *
+ * @param value 输入值
+ * @param min 下限
+ * @param max 上限
+ * @returns 钳制后的值
+ * 异常：无
+ * 注意事项：min > max 时结果未定义，调用方需保证区间合法
+ */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * 姿态角速率街机飞行模型积分（单个固定步）
+ *
+ * 功能：按“姿态角速率 + 油门 + 速度区间”的自研街机模型推进飞行器一个固定步：
+ * 1) 油门积分与杆量平滑；2) 地面滑跑（锁定滚转/偏航、限抬头角、离地判定）；
+ * 3) 空中姿态积分（俯仰受 G 限动器约束、失速降权限与机头下压）；
+ * 4) 速度标量积分（推力 - 阻力 - 重力沿机头分量）；
+ * 5) 位置积分与 G 值计算；6) 坠地判定（坠毁置 alive=false）。
+ * 全程使用四元数局部旋转，任意姿态下无万向节死锁；
+ * 全部性能参数读取 aircraft.params（机型差异的落点）。
+ * @param entity 飞行器实体（须挂有 aircraft 组件且存活）
+ * @param input 本固定步的控制输入快照（玩家输入或 AI 生成的控制量）
+ * @param dt 固定时间步长（秒）
+ * @returns void（结果写入实体与组件字段）
+ * 异常：无（内部不做防御性校验，调用方保证组件存在）
+ * 注意事项：
+ * - 前向约定：本体 -Z 为机头；拉杆(+pitch)对应绕局部 X 正向旋转（抬头）；
+ *   右滚(+roll)对应绕局部 Z 负向；右偏航(+yaw)对应绕局部 Y 负向；
+ * - 坠毁时仅置 alive=false 与 crashed=true，事件由世界层统一播报
+ */
+export function integrateAircraftFlight(entity: SimEntity, input: ControlInput, dt: number): void {
+  const ac = entity.aircraft;
+  if (ac === undefined || !entity.alive) {
+    return;
+  }
+  const p = ac.params;
+
+  // ---- 1) 油门与杆量平滑 ----
+  if (input.throttleUp) {
+    ac.throttle = clamp(ac.throttle + cfg.throttleRate * dt, 0, 1);
+  }
+  if (input.throttleDown) {
+    ac.throttle = clamp(ac.throttle - cfg.throttleRate * dt, 0, 1);
+  }
+  const maxStep = cfg.inputResponseRate * dt;
+  const sens = gameConfig.input;
+  ac.pitchIn += clamp(input.pitch * sens.pitchSensitivity - ac.pitchIn, -maxStep, maxStep);
+  ac.rollIn += clamp(input.roll * sens.rollSensitivity - ac.rollIn, -maxStep, maxStep);
+  ac.yawIn += clamp(input.yaw * sens.yawSensitivity - ac.yawIn, -maxStep, maxStep);
+
+  // ---- 2) 地面滑跑模式 ----
+  if (ac.onGround) {
+    integrateGroundRoll(entity, ac, dt);
+    return;
+  }
+
+  // ---- 3) 空中失速状态与操纵权限 ----
+  ac.stalled = ac.speed < p.stallSpeed;
+  const authority = ac.stalled
+    ? Math.max(cfg.controlAuthorityFloor, ac.speed / p.stallSpeed)
+    : 1;
+
+  // ---- 4) G 限动器：按当前速度限制可用俯仰角速率 ----
+  const vSafe = Math.max(ac.speed, 15);
+  const pullLimit = ((p.gLimitPositive - 1) * cfg.gravity) / vSafe;
+  const pushLimit = (-(p.gLimitNegative - 1) * cfg.gravity) / vSafe;
+  let pitchRate = p.pitchRateMax * authority * ac.pitchIn;
+  pitchRate = clamp(pitchRate, pushLimit, pullLimit);
+  const rollRate = p.rollRateMax * authority * ac.rollIn;
+  const yawRate = p.yawRateMax * authority * ac.yawIn;
+
+  // 局部旋转：pitch 绕 +X（抬头为正）、yaw 右偏绕 -Y、roll 右滚绕 -Z
+  _euler.set(pitchRate * dt, -yawRate * dt, -rollRate * dt, 'XYZ');
+  _deltaQ.setFromEuler(_euler);
+  entity.quaternion.multiply(_deltaQ).normalize();
+
+  // 失速：机头持续下压（绕局部 X 负向），严重度随速度亏损加深
+  let stallSeverity = 0;
+  if (ac.stalled) {
+    stallSeverity = clamp((p.stallSpeed - ac.speed) / (p.stallSpeed * 0.5), 0, 1);
+    _deltaQ.setFromAxisAngle(_pitchAxis, -cfg.stallPitchDropRate * stallSeverity * dt);
+    entity.quaternion.multiply(_deltaQ).normalize();
+  }
+
+  // ---- 5) 速度标量积分：推力 - 气动阻力 - 重力沿机头分量 ----
+  _forward.set(0, 0, -1).applyQuaternion(entity.quaternion);
+  const accel =
+    ac.throttle * p.thrustAccel -
+    p.dragCoefficient * ac.speed * ac.speed -
+    cfg.gravity * _forward.y;
+  ac.speed = clamp(ac.speed + accel * dt, 0, p.maxSpeed);
+
+  // ---- 6) 位置积分（速度 = 机头方向 × 速度标量；失速附加下沉） ----
+  entity.velocity.copy(_forward).multiplyScalar(ac.speed);
+  if (ac.stalled) {
+    entity.velocity.y -= cfg.stallSinkRate * stallSeverity;
+  }
+  entity.position.addScaledVector(entity.velocity, dt);
+
+  // ---- 7) G 值：俯仰向心过载 + 重力沿机体 up 分量 ----
+  _up.set(0, 1, 0).applyQuaternion(entity.quaternion);
+  ac.gLoad = clamp((pitchRate * ac.speed) / cfg.gravity + _up.y, -5, 12);
+
+  // ---- 8) 坠地判定：机身中心低于滑跑高度-余量即坠毁 ----
+  if (entity.position.y < cfg.gearHeight - cfg.crashMargin) {
+    entity.position.y = Math.max(entity.position.y, 0);
+    entity.alive = false;
+    ac.crashed = true;
+  }
+}
+
+/**
+ * 地面滑跑积分（私有逻辑分片）
+ *
+ * 功能：处理跑道滑跑阶段——滚转/偏航输入锁定，速度达到抬前轮阈值后
+ * 允许抬头（限最大地面抬头角），抬头超过离地角且速度足够即转入空中；
+ * 位置沿跑道方向推进且高度锁定在起落架高度
+ * @param entity 飞行器实体
+ * @param ac 飞行数据组件
+ * @param dt 固定时间步长（秒）
+ * @returns void
+ * 异常：无
+ * 注意事项：滑跑阶段姿态仅含俯仰（自单位姿态累积），天然保持水平；
+ * G 值固定为 1，失速标记恒为 false；起飞速度按机型参数包判定
+ */
+function integrateGroundRoll(entity: SimEntity, ac: NonNullable<SimEntity['aircraft']>, dt: number): void {
+  const p = ac.params;
+
+  // 抬前轮：速度足够且拉杆，仅允许正向俯仰
+  let pitchRate = 0;
+  if (ac.speed >= p.takeoffSpeed && ac.pitchIn > 0) {
+    pitchRate = p.pitchRateMax * ac.pitchIn;
+  }
+  if (pitchRate !== 0) {
+    _euler.set(pitchRate * dt, 0, 0, 'XYZ');
+    _deltaQ.setFromEuler(_euler);
+    entity.quaternion.multiply(_deltaQ).normalize();
+
+    // 地面最大抬头角钳制：超出则回转修正到上限
+    _forward.set(0, 0, -1).applyQuaternion(entity.quaternion);
+    const pitchAngle = Math.asin(clamp(_forward.y, -1, 1));
+    if (pitchAngle > cfg.groundMaxPitch) {
+      _deltaQ.setFromAxisAngle(_pitchAxis, cfg.groundMaxPitch - pitchAngle);
+      entity.quaternion.multiply(_deltaQ).normalize();
+    }
+  }
+
+  // 速度积分：推力 - 气动阻力 - 滚动阻力（机头近水平，重力分量忽略）
+  const accel =
+    ac.throttle * p.thrustAccel -
+    p.dragCoefficient * ac.speed * ac.speed -
+    cfg.rollingResistance;
+  ac.speed = clamp(ac.speed + accel * dt, 0, p.maxSpeed);
+
+  // 位置沿机头水平推进，高度锁定起落架高度
+  _forward.set(0, 0, -1).applyQuaternion(entity.quaternion);
+  entity.velocity.copy(_forward).multiplyScalar(ac.speed);
+  entity.velocity.y = 0;
+  entity.position.addScaledVector(entity.velocity, dt);
+  entity.position.y = cfg.gearHeight;
+
+  // 离地判定：速度达标且抬头角超过离地角
+  _forward.set(0, 0, -1).applyQuaternion(entity.quaternion);
+  const pitchAngle = Math.asin(clamp(_forward.y, -1, 1));
+  if (ac.speed >= p.takeoffSpeed && pitchAngle >= cfg.liftoffPitch) {
+    ac.onGround = false;
+  }
+
+  ac.gLoad = 1;
+  ac.stalled = false;
+}

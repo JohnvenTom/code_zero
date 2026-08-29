@@ -1,0 +1,191 @@
+/* ============================================================
+   机库选择界面样式（ui 层）
+   ============================================================ */
+
+.hangar-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background: rgba(6, 10, 14, 0.88);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.hangar-overlay.is-visible {
+  display: flex;
+}
+
+.hangar-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: #7fe0c3;
+}
+
+.hangar-cards {
+  display: flex;
+  gap: 20px;
+  padding: 0 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ---------- 机型卡片 ---------- */
+.hangar-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 264px;
+  padding: 18px 20px;
+  background: rgba(10, 18, 26, 0.92);
+  border: 1px solid rgba(140, 200, 230, 0.28);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hangar-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(140, 200, 230, 0.55);
+}
+
+.hangar-card.is-selected {
+  border-color: #7fe0c3;
+  box-shadow: 0 0 24px rgba(127, 224, 195, 0.28);
+}
+
+.hangar-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hangar-card-name {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #d7e3ea;
+}
+
+.hangar-card-role {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: #ffd166;
+}
+
+/* ---------- 配色预览条 ---------- */
+.hangar-card-swatch {
+  display: flex;
+  height: 34px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.hangar-swatch-body {
+  flex: 1;
+}
+
+.hangar-swatch-accent {
+  width: 38%;
+}
+
+/* ---------- 描述 ---------- */
+.hangar-card-desc {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #a8bac6;
+  margin: 0;
+  min-height: 60px;
+}
+
+/* ---------- 属性条 ---------- */
+.hangar-card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hangar-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hangar-stat-label {
+  font-size: 11px;
+  color: #8fa8b8;
+  letter-spacing: 0.1em;
+  min-width: 34px;
+}
+
+.hangar-stat-bar {
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.hangar-stat-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a9de0, #7fe0c3);
+  border-radius: 4px;
+}
+
+/* ---------- 弹药/特殊武器行 ---------- */
+.hangar-card-ammo {
+  font-size: 11px;
+  color: #8fa8b8;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hangar-card-special {
+  font-size: 12px;
+  color: #ffd166;
+  letter-spacing: 0.04em;
+  padding: 6px 10px;
+  background: rgba(255, 209, 102, 0.08);
+  border: 1px solid rgba(255, 209, 102, 0.25);
+  border-radius: 6px;
+}
+
+/* ---------- 部署按钮 ---------- */
+.hangar-deploy-button {
+  margin-top: 4px;
+  padding: 9px 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: #0a121a;
+  background: #7fe0c3;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.hangar-deploy-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(127, 224, 195, 0.35);
+}
+
+/* ---------- 窄屏适配 ---------- */
+@media (max-width: 900px) {
+  .hangar-cards {
+    flex-direction: column;
+    align-items: center;
+    max-height: 72vh;
+    overflow-y: auto;
+  }
+
+  .hangar-card {
+    width: min(320px, 84vw);
+  }
+}

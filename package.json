@@ -1,0 +1,21 @@
+{
+  "name": "code-zero",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CODE ZERO —— 浏览器 3D 街机空战游戏（Three.js + TypeScript + Vite）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

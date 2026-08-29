@@ -1,0 +1,602 @@
+/* ============================================================
+   HUD 覆盖层样式（ui 层）
+   布局原则：低干扰，不遮挡核心视区；
+   飞行仪表分居两侧，准星/告警居中，性能条收敛于左上角
+   ============================================================ */
+
+/* HUD 全屏根容器：不拦截任何指针事件 */
+#hud-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  color: #d7e3ea;
+  user-select: none;
+}
+
+/* 左上角紧凑性能状态条 */
+.hud-status-strip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 14px;
+  padding: 6px 12px;
+  background: rgba(8, 14, 20, 0.45);
+  border: 1px solid rgba(140, 200, 230, 0.2);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+/* 单个统计项 */
+.hud-stat {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.hud-stat-label {
+  opacity: 0.6;
+}
+
+.hud-stat-value {
+  font-family: Consolas, 'Courier New', monospace;
+  color: #7fe0c3;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 中央准星 ---------- */
+.hud-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  transform: translate(-50%, -50%);
+  opacity: 0.85;
+}
+
+/* 竖线：上下两段，中段留空 */
+.hud-crosshair::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: linear-gradient(
+    180deg,
+    rgba(215, 227, 234, 0.95) 0 34%,
+    transparent 34% 66%,
+    rgba(215, 227, 234, 0.95) 66% 100%
+  );
+}
+
+/* 横线：左右两段，中段留空 */
+.hud-crosshair::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: linear-gradient(
+    90deg,
+    rgba(215, 227, 234, 0.95) 0 34%,
+    transparent 34% 66%,
+    rgba(215, 227, 234, 0.95) 66% 100%
+  );
+}
+
+.hud-crosshair-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: rgba(215, 227, 234, 0.95);
+}
+
+/* ---------- 命中标记（X 形闪现） ---------- */
+.hud-hitmarker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  opacity: 0;
+}
+
+.hud-hitmarker::before,
+.hud-hitmarker::after {
+  content: '';
+  position: absolute;
+  background: #ffd166;
+}
+
+.hud-hitmarker::before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+}
+
+.hud-hitmarker::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+}
+
+.hud-hitmarker.is-active {
+  animation: hud-hit-flash 0.22s ease-out;
+}
+
+@keyframes hud-hit-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---------- 击毁提示（准星上方浮现） ---------- */
+.hud-kill-toast {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 64px);
+  transform: translateX(-50%);
+  padding: 4px 14px;
+  background: rgba(8, 14, 20, 0.6);
+  border: 1px solid rgba(255, 209, 102, 0.45);
+  border-radius: 999px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: #ffd166;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.hud-kill-toast.is-active {
+  animation: hud-toast-fade 1.4s ease-out;
+}
+
+@keyframes hud-toast-fade {
+  0% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- G 值读数 ---------- */
+.hud-g {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 40px);
+  transform: translateX(-50%);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 14px;
+  color: #d7e3ea;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.hud-g.is-high {
+  color: #ffb454;
+}
+
+.hud-g.is-negative {
+  color: #7fb8ff;
+}
+
+/* ---------- 侧边仪表面板通用 ---------- */
+.hud-panel {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 108px;
+  padding: 10px 14px;
+  background: rgba(8, 14, 20, 0.5);
+  border: 1px solid rgba(140, 200, 230, 0.22);
+  border-radius: 8px;
+}
+
+.hud-speed {
+  left: 22px;
+}
+
+.hud-alt {
+  right: 22px;
+  text-align: right;
+}
+
+.hud-panel-label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+.hud-panel-value {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 27px;
+  color: #7fe0c3;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+/* ---------- 油门条 ---------- */
+.hud-throttle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hud-alt .hud-throttle {
+  justify-content: flex-end;
+}
+
+.hud-throttle-bar {
+  position: relative;
+  width: 6px;
+  height: 56px;
+  border: 1px solid rgba(140, 200, 230, 0.35);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hud-throttle-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  background: #7fe0c3;
+  transition: height 0.1s linear;
+}
+
+.hud-throttle-text {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 左下武器/生存面板 ---------- */
+.hud-weapons {
+  position: absolute;
+  left: 22px;
+  bottom: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 14px;
+  background: rgba(8, 14, 20, 0.5);
+  border: 1px solid rgba(140, 200, 230, 0.22);
+  border-radius: 8px;
+}
+
+.hud-weapon-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.hud-weapon-label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+  min-width: 42px;
+}
+
+.hud-weapon-value {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 18px;
+  color: #7fe0c3;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-weapon-value.is-empty {
+  color: #ef476f;
+}
+
+.hud-weapon-value.is-low {
+  color: #ffb454;
+}
+
+/* ---------- 右下雷达 ---------- */
+.hud-radar {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  width: 156px;
+  height: 156px;
+  border-radius: 50%;
+  background: rgba(8, 14, 20, 0.55);
+  border: 1px solid rgba(140, 200, 230, 0.35);
+  overflow: hidden;
+}
+
+/* 雷达扫描线：旋转的渐变扇面 */
+.hud-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(127, 224, 195, 0.35),
+    rgba(127, 224, 195, 0.05) 60deg,
+    transparent 90deg
+  );
+  animation: hud-radar-sweep 2.4s linear infinite;
+}
+
+@keyframes hud-radar-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 雷达中心玩家标记 */
+.hud-radar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-top: 2px solid #d7e3ea;
+  border-left: 2px solid #d7e3ea;
+  transform: rotate(45deg);
+}
+
+/* 雷达光点：以中心为原点平移定位 */
+.hud-radar-blip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+}
+
+.hud-radar-blip.is-enemy {
+  background: #ef476f;
+  box-shadow: 0 0 6px rgba(239, 71, 111, 0.8);
+}
+
+.hud-radar-blip.is-bomber {
+  background: #c74ae0;
+  box-shadow: 0 0 7px rgba(199, 74, 224, 0.85);
+}
+
+.hud-radar-blip.is-ally {
+  background: #4a9de0;
+  box-shadow: 0 0 6px rgba(74, 157, 224, 0.8);
+}
+
+.hud-radar-blip.is-wingman {
+  background: #7fe0c3;
+  box-shadow: 0 0 6px rgba(127, 224, 195, 0.85);
+}
+
+.hud-radar-blip.is-ground {
+  background: #ff8c42;
+  box-shadow: 0 0 6px rgba(255, 140, 66, 0.7);
+}
+
+/* ---------- 屏幕空间锁定框 ---------- */
+.hud-lockbox {
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  display: none;
+  pointer-events: none;
+}
+
+.hud-lockbox.is-locking {
+  display: block;
+  border: 2px dashed rgba(255, 209, 102, 0.9);
+  border-radius: 4px;
+}
+
+.hud-lockbox.is-locked {
+  display: block;
+  border: 2px solid rgba(239, 71, 111, 0.95);
+  border-radius: 4px;
+  box-shadow: 0 0 14px rgba(239, 71, 111, 0.45);
+}
+
+.hud-lockbox-label {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.hud-lockbox.is-locking .hud-lockbox-label {
+  color: #ffd166;
+}
+
+.hud-lockbox.is-locked .hud-lockbox-label {
+  color: #ef476f;
+  animation: hud-blink 0.5s steps(2, start) infinite;
+}
+
+/* ---------- 告警条（失速/导弹来袭/被锁定） ---------- */
+.hud-warn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-shadow: 0 0 12px currentColor;
+}
+
+.hud-warn.is-active {
+  display: block;
+  animation: hud-blink 0.6s steps(2, start) infinite;
+}
+
+.hud-warn-stall {
+  top: 26%;
+  color: #ef476f;
+}
+
+.hud-warn-missile {
+  top: 19%;
+  color: #ef476f;
+}
+
+.hud-warn-lock {
+  top: 19%;
+  color: #ffd166;
+}
+
+@keyframes hud-blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* ---------- 坠毁提示 ---------- */
+.hud-crash {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 34px;
+  background: rgba(40, 8, 14, 0.72);
+  border: 1px solid rgba(239, 71, 111, 0.55);
+  border-radius: 10px;
+}
+
+.hud-crash.is-active {
+  display: flex;
+}
+
+.hud-crash-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: #ef476f;
+}
+
+.hud-crash-hint {
+  font-size: 13px;
+  opacity: 0.85;
+  letter-spacing: 0.06em;
+}
+
+/* ---------- 底部操作提示 ---------- */
+.hud-hint-chip {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  background: rgba(8, 14, 20, 0.45);
+  border: 1px solid rgba(140, 200, 230, 0.2);
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* ---------- WebGL 上下文丢失全屏遮罩（默认隐藏） ---------- */
+.hud-context-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 14, 0.82);
+}
+
+.hud-context-overlay.is-visible {
+  display: flex;
+}
+
+.hud-context-message {
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- 窄屏适配 ---------- */
+@media (max-width: 640px) {
+  .hud-status-strip {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    max-width: 70vw;
+  }
+
+  .hud-speed {
+    left: 10px;
+  }
+
+  .hud-alt {
+    right: 10px;
+  }
+
+  .hud-panel {
+    min-width: 84px;
+    padding: 8px 10px;
+  }
+
+  .hud-panel-value {
+    font-size: 21px;
+  }
+
+  .hud-weapons {
+    left: 10px;
+    bottom: 12px;
+    padding: 8px 10px;
+  }
+
+  .hud-weapon-value {
+    font-size: 15px;
+  }
+
+  .hud-radar {
+    width: 108px;
+    height: 108px;
+    right: 10px;
+    bottom: 12px;
+  }
+
+  .hud-hint-chip {
+    white-space: normal;
+    text-align: center;
+    max-width: 80vw;
+    bottom: 64px;
+    font-size: 11px;
+  }
+}

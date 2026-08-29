@@ -1,0 +1,248 @@
+/* ============================================================
+   任务界面样式（ui 层）：简报 / 任务 HUD / 结算
+   ============================================================ */
+
+/* ---------- 模态覆盖层（简报/结算共用） ---------- */
+.mission-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 14, 0.78);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+
+.mission-overlay.is-visible {
+  display: flex;
+}
+
+/* ---------- 卡片容器 ---------- */
+.mission-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 560px;
+  width: calc(100vw - 48px);
+  padding: 28px 32px;
+  background: rgba(10, 18, 26, 0.92);
+  border: 1px solid rgba(140, 200, 230, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+}
+
+.mission-card-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #7fe0c3;
+  border-bottom: 1px solid rgba(140, 200, 230, 0.25);
+  padding-bottom: 10px;
+}
+
+/* ---------- 简报段落 ---------- */
+.mission-briefing-line {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #c8d6e0;
+  margin: 0;
+}
+
+.mission-briefing-hint {
+  font-size: 12px;
+  color: #8fa8b8;
+  letter-spacing: 0.05em;
+}
+
+/* ---------- 通用按钮 ---------- */
+.mission-button {
+  align-self: center;
+  margin-top: 6px;
+  padding: 10px 42px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: #0a121a;
+  background: #7fe0c3;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.mission-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(127, 224, 195, 0.35);
+}
+
+.mission-button:active {
+  transform: translateY(0);
+}
+
+/* ---------- 任务 HUD：顶部阶段目标 ---------- */
+.mission-hud {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 18px;
+  background: rgba(8, 14, 20, 0.55);
+  border: 1px solid rgba(140, 200, 230, 0.22);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.mission-hud.is-visible {
+  display: flex;
+}
+
+.mission-hud-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #ffd166;
+  text-align: center;
+}
+
+.mission-hud-objective {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.mission-hud-objective-label {
+  font-size: 12px;
+  color: #c8d6e0;
+  letter-spacing: 0.06em;
+}
+
+.mission-hud-objective-label::before {
+  content: '▸ ';
+  color: #7fe0c3;
+}
+
+.mission-hud-objective-value {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  color: #7fe0c3;
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-hud-objective.is-done .mission-hud-objective-label {
+  color: #6f8a7c;
+  text-decoration: line-through;
+}
+
+.mission-hud-objective.is-done .mission-hud-objective-label::before {
+  content: '✓ ';
+  color: #7fe0c3;
+}
+
+.mission-hud-objective.is-done .mission-hud-objective-value {
+  color: #4a6a5c;
+}
+
+/* ---------- 任务总倒计时（右上角） ---------- */
+.mission-timer {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  display: none;
+  padding: 7px 16px;
+  background: rgba(8, 14, 20, 0.55);
+  border: 1px solid rgba(140, 200, 230, 0.22);
+  border-radius: 8px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 17px;
+  color: #7fe0c3;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.mission-timer.is-visible {
+  display: block;
+}
+
+.mission-timer.is-urgent {
+  color: #ef476f;
+  animation: mission-blink 0.8s steps(2, start) infinite;
+}
+
+/* ---------- 结算界面 ---------- */
+.mission-result-title.is-victory {
+  color: #ffd166;
+}
+
+.mission-result-title.is-failed {
+  color: #ef476f;
+}
+
+.mission-result-reason {
+  font-size: 13px;
+  color: #d98a9a;
+  letter-spacing: 0.08em;
+}
+
+.mission-result-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mission-result-stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 14px;
+}
+
+.mission-result-stat-label {
+  color: #8fa8b8;
+  letter-spacing: 0.08em;
+}
+
+.mission-result-stat-value {
+  font-family: Consolas, 'Courier New', monospace;
+  color: #d7e3ea;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 动画 ---------- */
+@keyframes mission-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ---------- 窄屏适配 ---------- */
+@media (max-width: 640px) {
+  .mission-card {
+    padding: 20px;
+    gap: 10px;
+  }
+
+  .mission-card-title {
+    font-size: 18px;
+  }
+
+  .mission-hud {
+    top: 56px;
+    padding: 6px 12px;
+    max-width: 74vw;
+  }
+
+  .mission-hud-title {
+    font-size: 12px;
+  }
+
+  .mission-timer {
+    top: 56px;
+    right: 10px;
+    font-size: 14px;
+  }
+}

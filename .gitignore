@@ -1,0 +1,12 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+
+# 本地环境文件
+*.local
+
+# 编辑器/系统杂项
+.DS_Store
+Thumbs.db
