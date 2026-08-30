@@ -46,60 +46,159 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 中央准星 ---------- */
+/* ---------- 中央动态准星（速度张合支架 + 旋转刻度环 + 锁定联动） ---------- */
 .hud-crosshair {
+  --cs-spread: 26px;
+  --cs-jitter: 0px;
+  --cs-color: rgba(215, 227, 234, 0.95);
+  --cs-glow: rgba(120, 200, 255, 0.35);
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 46px;
-  height: 46px;
+  width: 0;
+  height: 0;
+  /* 高 G 抖动：--cs-jitter 由 HUD 每帧写入，0 时静止 */
+  animation: hud-cs-jitter 0.12s steps(2, end) infinite;
+}
+
+/* 四支架：位置由 --cs-spread 驱动（速度映射），带缓动 */
+.hud-crosshair-arm {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--cs-color);
+  box-shadow: 0 0 4px var(--cs-glow);
+  transition: transform 0.15s ease-out;
+}
+
+.hud-crosshair-arm.arm-t {
+  width: 2px;
+  height: 9px;
+  transform: translate(-50%, calc(-1 * var(--cs-spread) - 9px));
+}
+
+.hud-crosshair-arm.arm-b {
+  width: 2px;
+  height: 9px;
+  transform: translate(-50%, var(--cs-spread));
+}
+
+.hud-crosshair-arm.arm-l {
+  width: 9px;
+  height: 2px;
+  transform: translate(calc(-1 * var(--cs-spread) - 9px), -50%);
+}
+
+.hud-crosshair-arm.arm-r {
+  width: 9px;
+  height: 2px;
+  transform: translate(var(--cs-spread), -50%);
+}
+
+/* 旋转刻度环：repeating-conic 刻度 + mask 挖环形，常速旋转 */
+.hud-crosshair-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 72px;
+  height: 72px;
   transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: repeating-conic-gradient(
+    var(--cs-color) 0deg 1.5deg,
+    transparent 1.5deg 11.25deg
+  );
+  -webkit-mask: radial-gradient(circle, transparent 33px, #000 34px, #000 35px, transparent 36px);
+  mask: radial-gradient(circle, transparent 33px, #000 34px, #000 35px, transparent 36px);
+  opacity: 0.4;
+  animation: hud-cs-spin 14s linear infinite;
+}
+
+/* 中心发光点 */
+.hud-crosshair-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5px;
+  height: 5px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--cs-color);
+  box-shadow: 0 0 8px 1px var(--cs-glow);
+}
+
+/* 锁定中：黄色 */
+.hud-crosshair.is-locking {
+  --cs-color: rgba(255, 209, 102, 0.98);
+  --cs-glow: rgba(255, 209, 102, 0.5);
+}
+
+/* 锁定完成：红色 + 环加速 + 中心点脉冲 */
+.hud-crosshair.is-locked {
+  --cs-color: rgba(239, 71, 111, 0.98);
+  --cs-glow: rgba(239, 71, 111, 0.6);
+}
+
+.hud-crosshair.is-locked .hud-crosshair-ring {
+  animation-duration: 3s;
   opacity: 0.85;
 }
 
-/* 竖线：上下两段，中段留空 */
-.hud-crosshair::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  margin-left: -1px;
-  background: linear-gradient(
-    180deg,
-    rgba(215, 227, 234, 0.95) 0 34%,
-    transparent 34% 66%,
-    rgba(215, 227, 234, 0.95) 66% 100%
-  );
+.hud-crosshair.is-locked .hud-crosshair-dot {
+  animation: hud-cs-pulse 0.8s ease-in-out infinite;
 }
 
-/* 横线：左右两段，中段留空 */
-.hud-crosshair::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 2px;
-  margin-top: -1px;
-  background: linear-gradient(
-    90deg,
-    rgba(215, 227, 234, 0.95) 0 34%,
-    transparent 34% 66%,
-    rgba(215, 227, 234, 0.95) 66% 100%
-  );
+/* 命中反馈：中心点开火脉冲（写在 is-locked 之后以覆盖锁定脉冲） */
+.hud-crosshair.is-firing .hud-crosshair-dot {
+  animation: hud-cs-fire 0.16s ease-out;
 }
 
-.hud-crosshair-dot {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 3px;
-  height: 3px;
-  margin: -1.5px 0 0 -1.5px;
-  border-radius: 50%;
-  background: rgba(215, 227, 234, 0.95);
+/* 高 G 抖动关键帧（transform 合成层，不触发布局） */
+@keyframes hud-cs-jitter {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(var(--cs-jitter), calc(var(--cs-jitter) * -0.6));
+  }
+  50% {
+    transform: translate(calc(var(--cs-jitter) * -1), var(--cs-jitter));
+  }
+  75% {
+    transform: translate(calc(var(--cs-jitter) * 0.7), calc(var(--cs-jitter) * -1));
+  }
+}
+
+@keyframes hud-cs-spin {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes hud-cs-pulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.5);
+  }
+}
+
+@keyframes hud-cs-fire {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(2.4);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 /* ---------- 命中标记（X 形闪现） ---------- */

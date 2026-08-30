@@ -493,9 +493,9 @@ export const gameConfig = {
     boundaryPillarColor: 0xffb454,
     boundaryPillarOpacity: 0.55,
   } satisfies EnvironmentConfig,
-  /** 街机飞行模型（迭代8：俯仰基准速率上调 50% 改善狗斗转向） */
+  /** 街机飞行模型（迭代9：俯仰基准速率在迭代8 基础上再上调 50%，强化狗斗转向） */
   flight: {
-    pitchRateMax: 2.55,
+    pitchRateMax: 3.83,
     rollRateMax: 3.2,
     yawRateMax: 0.45,
     stallSpeed: 72,
@@ -517,7 +517,7 @@ export const gameConfig = {
     liftoffPitch: 0.09,
     crashMargin: 0.5,
   } satisfies FlightConfig,
-  /** 键盘输入（迭代8 重映射：A/D 踩舵，小键盘 4/6 滚转，方向键 ←→ 保留偏航） */
+  /** 键盘输入（迭代9 重映射：方向键 ←→ 改为滚转，小键盘滚转取消；A/D 踩舵偏航） */
   input: {
     pitchSensitivity: 1,
     rollSensitivity: 1,
@@ -525,10 +525,10 @@ export const gameConfig = {
     keys: {
       pitchPull: 'ArrowDown',
       pitchPush: 'ArrowUp',
-      rollLeft: ['NumpadLeft', 'Numpad4'],
-      rollRight: ['NumpadRight', 'Numpad6'],
-      yawLeft: ['KeyA', 'ArrowLeft'],
-      yawRight: ['KeyD', 'ArrowRight'],
+      rollLeft: ['ArrowLeft'],
+      rollRight: ['ArrowRight'],
+      yawLeft: ['KeyA'],
+      yawRight: ['KeyD'],
       throttleUp: 'KeyW',
       throttleDown: 'KeyS',
       fire: ['Space', 'KeyJ'],

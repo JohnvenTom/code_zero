@@ -144,11 +144,19 @@ export function createHud(root: HTMLElement): Hud {
   const entityCountValue = createStat(strip, '实体');
   root.appendChild(strip);
 
-  // ---- 中央准星 ----
+  // ---- 中央动态准星（速度张合支架 + 旋转刻度环 + 锁定联动） ----
   const crosshair = document.createElement('div');
   crosshair.className = 'hud-crosshair';
+  const crosshairRing = document.createElement('div');
+  crosshairRing.className = 'hud-crosshair-ring';
   const crosshairDot = document.createElement('div');
   crosshairDot.className = 'hud-crosshair-dot';
+  for (const side of ['t', 'b', 'l', 'r']) {
+    const arm = document.createElement('div');
+    arm.className = `hud-crosshair-arm arm-${side}`;
+    crosshair.appendChild(arm);
+  }
+  crosshair.appendChild(crosshairRing);
   crosshair.appendChild(crosshairDot);
   root.appendChild(crosshair);
 
@@ -309,7 +317,7 @@ export function createHud(root: HTMLElement): Hud {
   const chip = document.createElement('div');
   chip.className = 'hud-hint-chip';
   chip.textContent =
-    'W/S 油门 · ↑↓ 俯仰 · A/D 踩舵 · 小键盘4/6 滚转 · 空格 机炮 · F 导弹 · Q 特殊 · C 僚机 · E 干扰弹 · R 重置';
+    'W/S 油门 · ↑↓ 俯仰 · ←→ 滚转 · A/D 踩舵 · 空格 机炮 · F 导弹 · Q 特殊 · C 僚机 · E 干扰弹 · R 重置';
   root.appendChild(chip);
 
   // ---- WebGL 上下文丢失遮罩（默认隐藏） ----
@@ -364,6 +372,17 @@ export function createHud(root: HTMLElement): Hud {
         wingmanValue.textContent = `${flight.wingmenAlive}/${flight.wingmenTotal} ${commandText}`;
         enemyValue.textContent = `${flight.enemyKills}`;
 
+        // 动态准星：支架张合随速度映射（低速张开大瞄准余裕、高速收拢稳定），
+        // 高 G 抖动幅度，锁定状态联动变色（速度域用 km/h：极速约 1100+）
+        const speedRatio = Math.min(flight.speedKmh / 1100, 1);
+        const spread = 26 - speedRatio * 12;
+        const jitter = Math.min(Math.max(Math.abs(flight.gLoad) - 4, 0) * 0.7, 2.6);
+        const lockState = stats.lock !== null ? stats.lock.state : 'none';
+        crosshair.classList.toggle('is-locking', lockState === 'locking');
+        crosshair.classList.toggle('is-locked', lockState === 'locked');
+        crosshair.style.setProperty('--cs-spread', `${spread.toFixed(1)}px`);
+        crosshair.style.setProperty('--cs-jitter', `${jitter.toFixed(2)}px`);
+
         gReadout.classList.toggle('is-high', flight.gLoad >= G_WARN_THRESHOLD);
         gReadout.classList.toggle('is-negative', flight.gLoad < -0.5);
         gunValue.classList.toggle('is-empty', flight.ammo <= 0);
@@ -388,6 +407,10 @@ export function createHud(root: HTMLElement): Hud {
         missileWarning.classList.remove('is-active');
         lockWarning.classList.remove('is-active');
         crashPanel.classList.remove('is-active');
+        // 无飞行数据时重置准星状态与张合
+        crosshair.classList.remove('is-locking', 'is-locked');
+        crosshair.style.setProperty('--cs-spread', '26px');
+        crosshair.style.setProperty('--cs-jitter', '0px');
       }
 
       // 全目标屏幕标记：池化更新标记框/边缘箭头/来袭导弹
@@ -431,6 +454,8 @@ export function createHud(root: HTMLElement): Hud {
       }
       if (hasHit) {
         retriggerAnimation(hitmarker, 'is-active');
+        // 命中时准星同步开火脉冲反馈
+        retriggerAnimation(crosshair, 'is-firing');
       }
       if (destroyedText !== null) {
         killToast.textContent = destroyedText;
