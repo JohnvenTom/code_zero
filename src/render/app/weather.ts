@@ -194,15 +194,18 @@ export class WeatherController {
     }
     const dtc = Math.min(Math.max(dt, 0), 0.1);
 
-    // ---- 1) 雨：跟随相机 + 下落回绕 ----
-    this.group.position.set(this.camera.position.x, 0, this.camera.position.z);
+    // ---- 1) 雨：跟随相机（X/Y/Z 全轴，中高空也处于雨幕中）+ 下落回绕 ----
+    // Y 也跟随相机：雨盒以相机高度为中心展开，玩家爬升到任何高度
+    // 周围始终有雨线（旧实现 Y 固定 0，中高空雨盒落在脚下远方便看不到了）
+    this.group.position.set(this.camera.position.x, this.camera.position.y, this.camera.position.z);
     const box = weatherCfg.rainBoxSize;
     const positions = this.rain.geometry.getAttribute('position');
     for (let i = 0; i < this.rainY.length; i++) {
       const newY = this.rainY[i]! - weatherCfg.rainFallSpeed * dtc;
+      // 回绕域改为相机相对局部坐标（0..box，盒中心在相机高度）
       this.rainY[i] = newY < 0 ? box : newY;
-      positions.setY(i * 2, this.rainY[i]!);
-      positions.setY(i * 2 + 1, this.rainY[i]! + weatherCfg.rainStreakLength);
+      positions.setY(i * 2, this.rainY[i]! - box * 0.5);
+      positions.setY(i * 2 + 1, this.rainY[i]! - box * 0.5 + weatherCfg.rainStreakLength);
     }
     positions.needsUpdate = true;
 

@@ -62,6 +62,34 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * 操纵杆量非对称平滑（私有）
+ *
+ * 功能：键盘二元输入→连续杆量的过渡——加大杆量方向用慢速率
+ * （attack，建立过程给玩家精细瞄准的空间：轻点轻拉、长按满拉），
+ * 减小/回中/反向用快速率（release，松杆立即回中不粘滞）
+ * @param current 当前平滑杆量
+ * @param target 目标杆量（原始输入×灵敏度）
+ * @param dt 时间步长（秒）
+ * @param attackRate 加大杆量方向的速率（1/s）
+ * @param releaseRate 减小杆量方向的速率（1/s）
+ * @returns 新的平滑杆量
+ * 异常：无
+ * 注意事项：判断方向用 |target|>|current|（含反向过零场景）
+ */
+function smoothStick(
+  current: number,
+  target: number,
+  dt: number,
+  attackRate: number,
+  releaseRate: number,
+): number {
+  const growing = Math.abs(target) > Math.abs(current);
+  const rate = growing ? attackRate : releaseRate;
+  const maxStep = rate * dt;
+  return current + clamp(target - current, -maxStep, maxStep);
+}
+
+/**
  * 计算最佳机动速度操纵权限因子（corner speed 曲线）
  *
  * 功能：按当前速度相对最佳机动速度的位置计算操纵权限 0..1——
@@ -130,18 +158,20 @@ export function integrateAircraftFlight(entity: SimEntity, input: ControlInput, 
   }
   const p = ac.params;
 
-  // ---- 1) 油门与杆量平滑 ----
+  // ---- 1) 油门与杆量平滑（非对称：建立慢=精细瞄准，回中快=不粘滞） ----
   if (input.throttleUp) {
     ac.throttle = clamp(ac.throttle + cfg.throttleRate * dt, 0, 1);
   }
   if (input.throttleDown) {
     ac.throttle = clamp(ac.throttle - cfg.throttleRate * dt, 0, 1);
   }
-  const maxStep = cfg.inputResponseRate * dt;
   const sens = gameConfig.input;
-  ac.pitchIn += clamp(input.pitch * sens.pitchSensitivity - ac.pitchIn, -maxStep, maxStep);
-  ac.rollIn += clamp(input.roll * sens.rollSensitivity - ac.rollIn, -maxStep, maxStep);
-  ac.yawIn += clamp(input.yaw * sens.yawSensitivity - ac.yawIn, -maxStep, maxStep);
+  ac.pitchIn = smoothStick(ac.pitchIn, input.pitch * sens.pitchSensitivity, dt,
+    cfg.inputAttackRate, cfg.inputResponseRate);
+  ac.rollIn = smoothStick(ac.rollIn, input.roll * sens.rollSensitivity, dt,
+    cfg.inputAttackRate, cfg.inputResponseRate);
+  ac.yawIn = smoothStick(ac.yawIn, input.yaw * sens.yawSensitivity, dt,
+    cfg.inputAttackRate, cfg.inputResponseRate);
 
   // ---- 2) 地面滑跑模式 ----
   if (ac.onGround) {
@@ -158,10 +188,14 @@ export function integrateAircraftFlight(entity: SimEntity, input: ControlInput, 
     p.maxSpeed,
   );
 
-  // ---- 4) G 限动器：按当前速度限制可用俯仰角速率 ----
+  // ---- 4) G 限动器（街机容忍：允许超出机型 G 限一定比例） ----
+  // 物理硬钳制 pullLimit=(G限-1)g/v 在巡航速度下把俯仰速率压得很低
+  // （真实飞机如此，街机手感偏迟缓）——放宽为允许实际 G 达到
+  // 机型 G 限 × (1 + gLimiterRelax)，超限部分按该比例容忍
   const vSafe = Math.max(ac.speed, 15);
-  const pullLimit = ((p.gLimitPositive - 1) * cfg.gravity) / vSafe;
-  const pushLimit = (-(p.gLimitNegative - 1) * cfg.gravity) / vSafe;
+  const gTol = 1 + cfg.gLimiterRelax;
+  const pullLimit = ((p.gLimitPositive * gTol - 1) * cfg.gravity) / vSafe;
+  const pushLimit = (-(p.gLimitNegative * gTol - 1) * cfg.gravity) / vSafe;
   let pitchRate = p.pitchRateMax * authority * ac.pitchIn;
   pitchRate = clamp(pitchRate, pushLimit, pullLimit);
   const rollRate = p.rollRateMax * authority * ac.rollIn;
@@ -196,8 +230,9 @@ export function integrateAircraftFlight(entity: SimEntity, input: ControlInput, 
   entity.position.addScaledVector(entity.velocity, dt);
 
   // ---- 7) G 值：俯仰向心过载 + 重力沿机体 up 分量 ----
+  // 钳制区间放宽（允许显示街机超限 G，配合 G 限动器容忍系数）
   _up.set(0, 1, 0).applyQuaternion(entity.quaternion);
-  ac.gLoad = clamp((pitchRate * ac.speed) / cfg.gravity + _up.y, -5, 12);
+  ac.gLoad = clamp((pitchRate * ac.speed) / cfg.gravity + _up.y, -8, 20);
 
   // ---- 8) 坠地判定：机身中心低于滑跑高度-余量即坠毁 ----
   if (entity.position.y < cfg.gearHeight - cfg.crashMargin) {

@@ -10,13 +10,14 @@ import {
 } from 'three';
 
 /**
- * 翼尖涡流拖尾系统（高 G 机动显现的白色雾化涡流带）
+ * 翼尖涡流拖尾系统（航迹云式常驻白色雾化拖尾）
  *
- * 功能：为每架存活战机（玩家/敌机/僚机）在双翼尖生成渐隐条带——
- * 每帧从翼尖世界坐标向历史位置延伸（长度约 80m 渐隐）；
- * 透明度与线宽随 |G| 增强（G>3 逐渐显现，G≥6 明显白雾）；
+ * 功能：为每架存活战机（玩家/敌机/僚机）在双翼尖生成常驻渐隐条带——
+ * 空中飞行时始终可见（与航迹云一致，久留空中约 720m 后自然淡出），
+ * 高 G 机动时透明度额外增强（G 2→6 渐强白雾感）；
+ * 每帧从翼尖世界坐标按固定距离采样向历史位置延伸；
  * 以池化 LineSegments 实现（每机 2 条，容量按实体上限分配），
- * 历史位置环形缓冲（避免运行时分配）。
+ * 历史位置环形缓冲（避免运行时分配），逐段顶点色渐隐。
  * 边界约定：本类属渲染层装饰，只读取实体插值位姿与 G 值。
  */
 export class WingtipVortices {
@@ -27,10 +28,12 @@ export class WingtipVortices {
   private readonly trails: VortexTrail[] = [];
   /** 池容量（同时可见的最大飞机数 × 2 翼尖） */
   private readonly maxTrails: number;
-  /** 历史位置环形缓冲长度（每条；固定距离采样，48 点×5m≈240m 拖尾） */
-  private static readonly HISTORY = 48;
-  /** 相邻历史点的采样距离（米；机动力度大时拖尾更长更持久） */
-  private static readonly SAMPLE_DISTANCE = 5;
+  /** 历史位置环形缓冲长度（每条；固定距离采样，120 点×6m≈720m 航迹云式拖尾） */
+  private static readonly HISTORY = 120;
+  /** 相邻历史点的采样距离（米；拖尾长度与速度解耦，久留空中） */
+  private static readonly SAMPLE_DISTANCE = 6;
+  /** 采样启用高度（米；地面滑跑不产生航迹） */
+  private static readonly MIN_ALTITUDE = 25;
 
   /** 涡流颜色 */
   private static readonly COLOR = new Color(0xe8f2f8);
@@ -150,24 +153,27 @@ export class WingtipVortices {
       _tip.set(sideSign * 7, 0, 0).applyQuaternion(frame.quaternion).add(frame.position);
 
       // 追加历史点（固定距离采样：翼尖移动超过 SAMPLE_DISTANCE 才入列，
-      // 使拖尾长度与飞行速度/时间解耦——高速/急转弯后涡流留存 ~240m）
+      // 使拖尾长度与飞行速度/时间解耦；仅空中产生航迹，地面滑跑不采样）
       const first = trail.history[0];
-      if (first === undefined || first.distanceTo(_tip) >= WingtipVortices.SAMPLE_DISTANCE) {
+      if (
+        frame.position.y > WingtipVortices.MIN_ALTITUDE &&
+        (first === undefined || first.distanceTo(_tip) >= WingtipVortices.SAMPLE_DISTANCE)
+      ) {
         trail.history.unshift(_tip.clone());
         if (trail.history.length > WingtipVortices.HISTORY) {
           trail.history.length = WingtipVortices.HISTORY;
         }
       }
 
-      // 强度：|G| 映射（G≤3 隐藏；3→6 线性至饱和）
+      // 强度：常驻航迹云基线 + |G| 机动增强（G 2→6 线性提升，>6 饱和）
+      // 涡流始终可见（与航迹云一致），高 G 时更浓更亮
       const g = Math.abs(frame.gLoad);
-      const intensity = Math.min(Math.max((g - 3) / 3, 0), 1);
-      if (intensity <= 0 || trail.history.length < 2) {
-        trail.lines.visible = false;
+      const gBoost = Math.min(Math.max((g - 2) / 4, 0), 1);
+      trail.lines.visible = trail.history.length >= 2;
+      if (trail.history.length < 2) {
         continue;
       }
-      trail.lines.visible = true;
-      trail.material.opacity = 0.55 * intensity;
+      trail.material.opacity = 0.4 + 0.5 * gBoost;
 
       // 写入线段顶点与顶点色：相邻历史点连线，颜色按段龄渐隐
       // （新段亮白、旧段趋透明——拖尾自然淡出效果）

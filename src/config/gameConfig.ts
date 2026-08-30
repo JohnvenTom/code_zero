@@ -162,8 +162,10 @@ export interface FlightConfig {
   readonly gLimitPositive: number;
   /** 负过载限制（G，限制推杆可用俯仰速率） */
   readonly gLimitNegative: number;
-  /** 输入平滑响应速率（1/s，键盘二元输入的柔和化） */
+  /** 输入平滑响应速率（1/s，键盘二元输入的柔和化——回中/减小杆量方向） */
   readonly inputResponseRate: number;
+  /** 杆量建立速率（1/s，加大杆量方向更慢，给玩家精细瞄准过渡） */
+  readonly inputAttackRate: number;
   /** 油门变化速率（1/s） */
   readonly throttleRate: number;
   /** 失速时机头下压速率（rad/s） */
@@ -172,6 +174,8 @@ export interface FlightConfig {
   readonly stallSinkRate: number;
   /** 失速时最低操纵权限系数（0..1） */
   readonly controlAuthorityFloor: number;
+  /** G 限动器放宽系数（0..1，街机软限制：0=物理硬钳制，1=完全不看 G 限） */
+  readonly gLimiterRelax: number;
   /** 地面滑跑时机身中心离地高度（米） */
   readonly gearHeight: number;
   /** 地面滑跑允许的最大抬头角（rad） */
@@ -559,10 +563,14 @@ export const gameConfig = {
     gLimitPositive: 9,
     gLimitNegative: 3.5,
     inputResponseRate: 7,
+    /** 杆量建立慢（0.33s 到满）：轻点轻拉精细瞄准，长按才满杆 */
+    inputAttackRate: 3,
     throttleRate: 0.55,
     stallPitchDropRate: 0.55,
     stallSinkRate: 25,
     controlAuthorityFloor: 0.22,
+    /** 街机 G 限容忍：允许实际 G 达到机型 G 限的 1.35 倍（0=严格物理钳制） */
+    gLimiterRelax: 0.35,
     gearHeight: 2.4,
     groundMaxPitch: 0.21,
     liftoffPitch: 0.09,
