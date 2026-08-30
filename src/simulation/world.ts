@@ -66,14 +66,29 @@ const CRUISE_INPUT: ControlInput = {
 /** 雷达光点种类（HUD 敌我识别着色） */
 export type RadarBlipKind = 'enemy' | 'bomber' | 'ally' | 'ground' | 'wingman';
 
-/** 雷达光点（以玩家为中心的机体坐标投影） */
+/** 雷达光点（north-up 固定方位：世界东=x 右 / 世界北=-z=屏幕上方） */
 export interface RadarBlip {
-  /** 右向偏移（米，正=玩家右侧；屏幕 x 轴） */
+  /** 世界东向偏移（米，正=目标在玩家东侧；屏幕 x 轴） */
   readonly x: number;
-  /** 前向偏移（米，负=玩家后方；屏幕 y 轴向下） */
+  /** 世界北向偏移（米，正=目标在玩家北侧；屏幕 y 轴向上为负） */
   readonly y: number;
   /** 光点种类 */
   readonly kind: RadarBlipKind;
+}
+
+/** 屏幕标记种类（全目标标记系统） */
+export type MarkerKind = 'enemy' | 'bomber' | 'ally' | 'wingman' | 'ground' | 'missile';
+
+/** 屏幕标记条目（世界层输出的标记源数据，渲染层投影为屏幕坐标） */
+export interface MarkerInfo {
+  /** 目标实体 ID（渲染层投影用） */
+  readonly id: number;
+  /** 标记种类 */
+  readonly kind: MarkerKind;
+  /** 与玩家距离（米，标记框下显示） */
+  readonly distance: number;
+  /** 是否来袭导弹（追踪玩家的敌方导弹，高威胁红色标记） */
+  readonly incoming: boolean;
 }
 
 /**
@@ -136,6 +151,10 @@ export interface PlayerFlightSnapshot {
   readonly lockProgress: number;
   /** 锁定目标实体 ID（HUD 屏幕锁定框定位用；无目标为 null） */
   readonly lockTargetId: number | null;
+  /** 锁定目标机型名（敌机/轰炸机型号，锁定框显示；无目标为空串） */
+  readonly lockTargetName: string;
+  /** 锁定目标距离（米；无目标为 0） */
+  readonly lockTargetDistance: number;
   /** 导弹来袭告警（有敌方导弹正追踪玩家） */
   readonly missileWarning: boolean;
   /** 被敌机瞄准告警（有敌机在包线内机头对准玩家） */
@@ -144,8 +163,12 @@ export interface PlayerFlightSnapshot {
   readonly kills: number;
   /** 累计击坠敌机数 */
   readonly enemyKills: number;
-  /** 雷达光点列表（以玩家为中心，机头朝上坐标） */
+  /** 雷达光点列表（north-up 固定方位：东=x 右 / 北=y 上） */
   readonly radarBlips: readonly RadarBlip[];
+  /** 玩家航向角（度，0=正北顺时针，雷达航向箭头旋转用） */
+  readonly playerHeadingDeg: number;
+  /** 全目标屏幕标记列表（敌机/轰炸机/地面/友军/僚机/来袭导弹） */
+  readonly markers: readonly MarkerInfo[];
 }
 
 /**
@@ -183,6 +206,9 @@ export class SimulationWorld {
 
   /** 玩家所选战机配置（spawnPlayer 时确定） */
   private playerFighter: FighterConfig | null = null;
+
+  /** 敌机机型名轮询计数器（生成敌机时依次取 typeNames） */
+  private enemyTypeIndex = 0;
 
   /**
    * 生成玩家战机（按所选机型装配属性与武器）
@@ -346,6 +372,7 @@ export class SimulationWorld {
           entity.aircraft.throttle = 0.5;
         }
         entity.health = createHealthData(mCfg.bombers.hp, mCfg.bombers.hitRadius);
+        entity.designation = enemyCfg.bomberTypeName;
         const [bx, by, bz] = mCfg.bombers.heading;
         this.faceTowards(entity, this._headingTarget.set(bx, by, bz));
         this.mission.registerBomber(entity.id);
@@ -361,6 +388,9 @@ export class SimulationWorld {
         entity.missiles = createMissilesData(enemyCfg.missileAmmo);
         entity.flares = createFlaresData(flareCfg.count);
         entity.ai = createEnemyAIState();
+        entity.designation =
+          enemyCfg.typeNames[this.enemyTypeIndex % enemyCfg.typeNames.length] ?? 'Foe';
+        this.enemyTypeIndex += 1;
         this.faceTowards(entity, PLAYER_SPAWN);
       }
       entity.prevQuaternion.copy(entity.quaternion);
@@ -720,13 +750,16 @@ export class SimulationWorld {
   /**
    * 生成玩家飞行快照（HUD 视图数据）
    *
-   * 功能：将玩家实体与组件状态投影为扁平只读结构；计算锁定状态、
-   * 导弹来袭/被瞄准告警；遍历全部敌方/友方目标生成以玩家为中心、
-   * 机头朝上的雷达光点坐标
+   * 功能：将玩家实体与组件状态投影为扁平只读结构；计算锁定状态
+   * （含锁定目标机型名与距离）、导弹来袭/被瞄准告警、玩家航向角；
+   * 遍历全部敌方/友方目标生成 north-up 固定方位雷达光点
+   * （世界东=x 右 / 世界北=y 上，不随玩家航向滚转）与
+   * 全目标屏幕标记列表（含来袭导弹）
    * @returns 玩家飞行快照；玩家未生成时返回 null
    * 异常：无
-   * 注意事项：每渲染帧调用一次；雷达坐标为平面投影（忽略高度差），
-   * 超出雷达半径的目标按方向钉在边缘
+   * 注意事项：每渲染帧调用一次；雷达/标记坐标为平面投影
+   * （忽略高度差），超出雷达半径的目标按方向钉在边缘；
+   * 标记仅含追踪玩家的敌方导弹（incoming），玩家自射导弹不标
    */
   getPlayerFlightData(): PlayerFlightSnapshot | null {
     const player = this.player;
@@ -735,21 +768,24 @@ export class SimulationWorld {
     }
 
     const blips: RadarBlip[] = [];
+    const markers: MarkerInfo[] = [];
     let missileWarning = false;
     let lockWarning = false;
     let wingmenAlive = 0;
 
     const forward = new Vector3(0, 0, -1).applyQuaternion(player.quaternion);
-    const right = new Vector3(1, 0, 0).applyQuaternion(player.quaternion);
     const rel = new Vector3();
     const enemyForward = new Vector3();
+
+    // 玩家航向角（north-up 雷达航向箭头用：0=正北，顺时针为正）
+    const playerHeadingDeg = (Math.atan2(forward.x, -forward.z) * 180) / Math.PI;
 
     for (const entity of this.entities) {
       if (!entity.alive) {
         continue;
       }
 
-      // 雷达光点：敌机/轰炸机/友军/僚机/地面目标（平面投影，机头朝上坐标）
+      // 雷达光点 + 屏幕标记：敌机/轰炸机/友军/僚机/地面目标
       if (
         entity.variant === 'enemy' ||
         entity.variant === 'bomber' ||
@@ -760,12 +796,13 @@ export class SimulationWorld {
         if (entity.variant === 'wingman') {
           wingmenAlive += 1;
         }
+        // north-up 固定方位：世界东(+x)=屏幕右，世界北(-z)=屏幕上
         rel.subVectors(entity.position, player.position);
-        let x = rel.dot(right);
-        let y = rel.dot(forward);
-        const distance = Math.hypot(x, y);
-        if (distance > radarCfg.range) {
-          const scale = radarCfg.range / distance;
+        let x = rel.x;
+        let y = -rel.z;
+        const planarDistance = Math.hypot(x, y);
+        if (planarDistance > radarCfg.range) {
+          const scale = radarCfg.range / planarDistance;
           x *= scale;
           y *= scale;
         }
@@ -779,15 +816,29 @@ export class SimulationWorld {
                 : entity.variant === 'wingman'
                   ? 'wingman'
                   : 'ground';
-        blips.push({ x, y: -y, kind });
+        blips.push({ x, y, kind });
+        markers.push({
+          id: entity.id,
+          kind,
+          distance: rel.length(),
+          incoming: false,
+        });
       }
 
-      // 导弹来袭告警：有导弹追踪玩家
+      // 来袭导弹标记 + 告警：追踪玩家的敌方导弹（高威胁）
       if (
         entity.missile !== undefined &&
-        entity.missile.targetId === player.id
+        entity.missile.targetId === player.id &&
+        entity.projectile !== undefined &&
+        entity.projectile.byEnemy
       ) {
         missileWarning = true;
+        markers.push({
+          id: entity.id,
+          kind: 'missile',
+          distance: entity.position.distanceTo(player.position),
+          incoming: true,
+        });
       }
 
       // 被瞄准告警：敌机在包线内且机头对准玩家
@@ -809,6 +860,17 @@ export class SimulationWorld {
       : lockTargetId !== null
         ? 'locking'
         : 'none';
+
+    // 锁定目标机型名与距离（真实战机风格锁定框显示）
+    let lockTargetName = '';
+    let lockTargetDistance = 0;
+    if (lockTargetId !== null) {
+      const lockTarget = this.findById(lockTargetId);
+      if (lockTarget !== undefined) {
+        lockTargetName = lockTarget.designation ?? '';
+        lockTargetDistance = lockTarget.position.distanceTo(player.position);
+      }
+    }
 
     return {
       alive: player.alive,
@@ -837,11 +899,15 @@ export class SimulationWorld {
       lockState,
       lockProgress: this.lockTracker.progress,
       lockTargetId,
+      lockTargetName,
+      lockTargetDistance,
       missileWarning,
       lockWarning,
       kills: this.kills,
       enemyKills: this.mission.getEnemyKills(),
       radarBlips: blips,
+      playerHeadingDeg,
+      markers,
     };
   }
 

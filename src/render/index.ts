@@ -25,6 +25,12 @@ export interface ScreenProjection {
   readonly y: number;
   /** 是否在相机前视锥内（false=在屏幕外或相机后方） */
   readonly onScreen: boolean;
+  /** NDC 横坐标（-1..1，出屏目标方向计算用；相机后方时方向需取反） */
+  readonly ndcX: number;
+  /** NDC 纵坐标（-1..1，NDC y 向上；出屏方向计算用） */
+  readonly ndcY: number;
+  /** 是否在相机正后方（z>1，投影方向镜像，边缘箭头方向须取反） */
+  readonly behind: boolean;
 }
 
 /** 渲染应用统一接口（由主循环每帧驱动） */
@@ -182,12 +188,14 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
      * 将实体当前渲染帧位置投影为屏幕坐标
      *
      * 功能：取实体渲染对象的插值位置，经相机投影矩阵变换为
-     * NDC 坐标后换算为屏幕像素坐标，并判定是否在前视锥内
+     * NDC 坐标后换算为屏幕像素坐标；输出视锥内判定与原始 NDC
+     * 分量（供 HUD 计算出屏目标的屏幕边缘箭头方向）
      * @param entityId 模拟实体 ID
      * @returns 屏幕投影；实体无渲染对象（未出现/已消亡）时返回 null
      * 异常：无
      * 注意事项：须在 render() 之后调用（插值位置已同步）；
-     * NDC z>1 表示在相机后方
+     * NDC z>1 表示在相机后方（behind=true），此时 NDC 方向
+     * 镜像，边缘箭头方向须取反
      */
     projectEntity(entityId) {
       const obj = bridge.getObject(entityId);
@@ -195,11 +203,14 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
         return null;
       }
       _projectVec.copy(obj.position).project(camera);
+      const behind = _projectVec.z > 1;
       return {
         x: (_projectVec.x * 0.5 + 0.5) * window.innerWidth,
         y: (-_projectVec.y * 0.5 + 0.5) * window.innerHeight,
-        onScreen:
-          _projectVec.z < 1 && Math.abs(_projectVec.x) <= 1 && Math.abs(_projectVec.y) <= 1,
+        onScreen: !behind && Math.abs(_projectVec.x) <= 1 && Math.abs(_projectVec.y) <= 1,
+        ndcX: _projectVec.x,
+        ndcY: _projectVec.y,
+        behind,
       };
     },
 

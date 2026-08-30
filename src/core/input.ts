@@ -11,6 +11,8 @@ const PUSH_SENSITIVITY = 0.8;
  * （导弹/干扰弹/重置为边沿触发），按 simulation 层定义的 ControlInput
  * 结构输出纯数据快照，供固定步模拟采样；俯仰输入不对称调优
  * （拉杆全量、推杆 0.8 倍，符合街机空战"抬头快低头柔"手感）；
+ * 键位映射（迭代8 重映射）：W/S 油门、↑↓ 俯仰、A/D 与 ←→ 踩舵
+ * （偏航）、小键盘 4/6 滚转；滚转/偏航为数组键位（任一按下即生效）；
  * 窗口失焦时自动清空避免按键卡死。
  * 边界约定：本类属于 core 层的 DOM 桥接件，只产生纯数据，
  * 不包含任何游戏规则；键位与灵敏度均来自配置表。
@@ -38,7 +40,8 @@ export class InputManager {
   /**
    * 构造输入管理器
    *
-   * 功能：构建键位占用集合并挂载 keydown/keyup/blur 事件监听
+   * 功能：构建键位占用集合（滚转/偏航为数组键位，展开注册）
+   * 并挂载 keydown/keyup/blur 事件监听
    * 参数：无
    * 异常：无
    * 注意事项：监听挂在 window 上随页面常驻；
@@ -48,10 +51,10 @@ export class InputManager {
     this.actionCodes = new Set<string>([
       this.keys.pitchPull,
       this.keys.pitchPush,
-      this.keys.rollLeft,
-      this.keys.rollRight,
-      this.keys.yawLeft,
-      this.keys.yawRight,
+      ...this.keys.rollLeft,
+      ...this.keys.rollRight,
+      ...this.keys.yawLeft,
+      ...this.keys.yawRight,
       this.keys.throttleUp,
       this.keys.throttleDown,
       this.keys.reset,
@@ -80,8 +83,14 @@ export class InputManager {
   sample(): ControlInput {
     const keys = this.keys;
     const rawPitch = (this.isDown(keys.pitchPull) ? 1 : 0) + (this.isDown(keys.pitchPush) ? -1 : 0);
-    const roll = (this.isDown(keys.rollRight) ? 1 : 0) + (this.isDown(keys.rollLeft) ? -1 : 0);
-    const yaw = (this.isDown(keys.yawRight) ? 1 : 0) + (this.isDown(keys.yawLeft) ? -1 : 0);
+    // 滚转：小键盘 4/6（数组键位，任一按下即生效）
+    const roll =
+      (keys.rollRight.some((code) => this.isDown(code)) ? 1 : 0) +
+      (keys.rollLeft.some((code) => this.isDown(code)) ? -1 : 0);
+    // 偏航（踩舵）：A/D 与方向键 ←→（数组键位）
+    const yaw =
+      (keys.yawRight.some((code) => this.isDown(code)) ? 1 : 0) +
+      (keys.yawLeft.some((code) => this.isDown(code)) ? -1 : 0);
     // 俯仰不对称：拉杆（抬头）保持全量，推杆（低头）衰减——
     // 街机空战手感（抬头跟手、俯冲可控）
     const pitch = rawPitch > 0 ? rawPitch : rawPitch * PUSH_SENSITIVITY;

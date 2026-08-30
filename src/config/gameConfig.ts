@@ -187,20 +187,20 @@ export interface InputConfig {
   readonly rollSensitivity: number;
   /** 偏航灵敏度乘数 */
   readonly yawSensitivity: number;
-  /** 键位映射（KeyboardEvent.code） */
+  /** 键位映射（KeyboardEvent.code；轴键位为数组，任一按下即生效） */
   readonly keys: {
     /** 拉杆抬头 */
     readonly pitchPull: string;
     /** 推杆低头 */
     readonly pitchPush: string;
-    /** 左滚转 */
-    readonly rollLeft: string;
-    /** 右滚转 */
-    readonly rollRight: string;
-    /** 左偏航 */
-    readonly yawLeft: string;
-    /** 右偏航 */
-    readonly yawRight: string;
+    /** 左滚转（小键盘 4；NumLock 开/关两种 code 均注册） */
+    readonly rollLeft: readonly string[];
+    /** 右滚转（小键盘 6；NumLock 开/关两种 code 均注册） */
+    readonly rollRight: readonly string[];
+    /** 左偏航（踩舵：A 与方向键 ←） */
+    readonly yawLeft: readonly string[];
+    /** 右偏航（踩舵：D 与方向键 →） */
+    readonly yawRight: readonly string[];
     /** 油门增大 */
     readonly throttleUp: string;
     /** 油门减小 */
@@ -338,6 +338,10 @@ export interface EnemyConfig {
   readonly minAltitude: number;
   /** 敌机生成位置列表 [x, y, z]（世界坐标，米；距玩家足够远以留出起飞窗口） */
   readonly spawnPositions: readonly (readonly [number, number, number])[];
+  /** 敌机机型名池（生成时轮询分配，HUD 锁定框显示） */
+  readonly typeNames: readonly string[];
+  /** 轰炸机机型名（HUD 锁定框显示） */
+  readonly bomberTypeName: string;
 }
 
 /** 玩家生存配置（Task 9：可被敌武器击伤） */
@@ -489,9 +493,9 @@ export const gameConfig = {
     boundaryPillarColor: 0xffb454,
     boundaryPillarOpacity: 0.55,
   } satisfies EnvironmentConfig,
-  /** 街机飞行模型 */
+  /** 街机飞行模型（迭代8：俯仰基准速率上调 50% 改善狗斗转向） */
   flight: {
-    pitchRateMax: 1.7,
+    pitchRateMax: 2.55,
     rollRateMax: 3.2,
     yawRateMax: 0.45,
     stallSpeed: 72,
@@ -513,7 +517,7 @@ export const gameConfig = {
     liftoffPitch: 0.09,
     crashMargin: 0.5,
   } satisfies FlightConfig,
-  /** 键盘输入 */
+  /** 键盘输入（迭代8 重映射：A/D 踩舵，小键盘 4/6 滚转，方向键 ←→ 保留偏航） */
   input: {
     pitchSensitivity: 1,
     rollSensitivity: 1,
@@ -521,10 +525,10 @@ export const gameConfig = {
     keys: {
       pitchPull: 'ArrowDown',
       pitchPush: 'ArrowUp',
-      rollLeft: 'KeyA',
-      rollRight: 'KeyD',
-      yawLeft: 'ArrowLeft',
-      yawRight: 'ArrowRight',
+      rollLeft: ['NumpadLeft', 'Numpad4'],
+      rollRight: ['NumpadRight', 'Numpad6'],
+      yawLeft: ['KeyA', 'ArrowLeft'],
+      yawRight: ['KeyD', 'ArrowRight'],
       throttleUp: 'KeyW',
       throttleDown: 'KeyS',
       fire: ['Space', 'KeyJ'],
@@ -612,6 +616,8 @@ export const gameConfig = {
       [1200, 850, -6600],
       [0, 1100, -8000],
     ],
+    typeNames: ['Su-35S', 'Rafale-M', 'MiG-29K', 'F/A-18E', 'J-16', 'Typhoon-FGR'],
+    bomberTypeName: 'Tu-95MS',
   } satisfies EnemyConfig,
   /** 玩家生存 */
   player: {

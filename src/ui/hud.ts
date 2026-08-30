@@ -15,6 +15,33 @@ export interface HudLockInfo {
   readonly screenY: number;
   /** 目标是否在屏幕内（false 时隐藏锁定框） */
   readonly onScreen: boolean;
+  /** 锁定目标机型名（locked 阶段显示，如 Su-35S） */
+  readonly targetName: string;
+  /** 锁定目标距离（米，locked 阶段显示） */
+  readonly distance: number;
+}
+
+/**
+ * 全目标屏幕标记（由 main.ts 结合渲染层投影组装）
+ *
+ * 功能：视线内目标显示小标记框+距离；出屏目标显示屏幕边缘
+ * 箭头（edgeAngleDeg 指示转向方向）；来袭导弹为红色高威胁标记
+ */
+export interface HudTargetMarker {
+  /** 标记种类（enemy/bomber/ally/wingman/ground/missile） */
+  readonly kind: string;
+  /** 屏幕横坐标（像素；视线内=目标位置，出屏=边缘箭头位置） */
+  readonly screenX: number;
+  /** 屏幕纵坐标（像素；同上） */
+  readonly screenY: number;
+  /** 是否在视线内（true=标记框，false=边缘箭头） */
+  readonly onScreen: boolean;
+  /** 出屏箭头朝向（度，0=上，顺时针；onScreen 时忽略） */
+  readonly edgeAngleDeg: number;
+  /** 与玩家距离（米） */
+  readonly distance: number;
+  /** 是否来袭导弹（红色高威胁闪烁标记） */
+  readonly incoming: boolean;
 }
 
 /**
@@ -33,6 +60,8 @@ export interface HudStats {
   readonly flight: PlayerFlightSnapshot | null;
   /** 锁定框屏幕定位数据（无锁定目标时为 null） */
   readonly lock: HudLockInfo | null;
+  /** 全目标屏幕标记列表（敌机/轰炸机/地面/友军/僚机/来袭导弹） */
+  readonly markers: readonly HudTargetMarker[];
   /** 本帧消费的模拟事件（命中/击毁/坠毁/导弹/干扰弹/锁定） */
   readonly events: readonly GameEvent[];
 }
@@ -64,6 +93,9 @@ const RADAR_RADIUS_PX = 78;
 /** 雷达光点 DOM 池容量（敌机+轰炸机+友军+地面目标上限） */
 const RADAR_BLIP_POOL = 32;
 
+/** 屏幕标记 DOM 池容量（敌机+轰炸机+友军+僚机+地面+来袭导弹上限） */
+const MARKER_POOL = 36;
+
 /** 雷达显示范围（米，来自配置表） */
 const RADAR_RANGE_M = gameConfig.radar.range;
 
@@ -89,15 +121,18 @@ function retriggerAnimation(element: HTMLElement, className: string): void {
  * 功能：在指定根容器内构建完整战斗 HUD——左上角性能状态条、
  * 中央准星 + G 值 + 命中标记与击毁提示、左侧速度/油门面板、
  * 右侧高度面板、左下武器/生存面板（机炮/导弹/干扰弹/机体）、
- * 右下雷达（敌我识别光点 + 扫描线）、屏幕空间锁定框、
+ * 右下 north-up 固定方位雷达（N 标记 + 玩家航向箭头 +
+ * 敌我识别光点 + 扫描线）、全目标屏幕标记池（视线内标记框+
+ * 距离 / 出屏贴边箭头 / 来袭导弹红色高威胁标记）、
+ * 真实战机风格四角锁定框（锁定完成显示目标型号+距离）、
  * 失速/导弹来袭/被锁定告警、坠毁提示、底部操作提示与
  * WebGL 上下文丢失遮罩
  * @param root HUD 根容器元素（index.html 中的 #hud-root）
  * @returns HUD 控制接口
  * @throws 无（DOM 构建失败由浏览器抛出的异常向上冒泡）
  * 注意事项：飞行数值每帧刷新（textContent 更新开销极低），
- * 性能状态条 0.25s 节流；雷达光点使用固定 DOM 池避免每帧重建；
- * HUD 为 pointer-events:none 覆盖层
+ * 性能状态条 0.25s 节流；雷达光点与屏幕标记均使用固定 DOM 池
+ * 避免每帧重建；HUD 为 pointer-events:none 覆盖层
  */
 export function createHud(root: HTMLElement): Hud {
   // ---- 左上角性能状态条 ----
@@ -184,15 +219,21 @@ export function createHud(root: HTMLElement): Hud {
   const enemyValue = createWeaponRow(weaponsPanel, '击坠', '');
   root.appendChild(weaponsPanel);
 
-  // ---- 右下雷达：圆形表盘 + 光点池 + 扫描线 ----
+  // ---- 右下雷达：north-up 固定方位表盘 + 光点池 + 航向箭头 ----
   const radar = document.createElement('div');
   radar.className = 'hud-radar';
   const radarSweep = document.createElement('div');
   radarSweep.className = 'hud-radar-sweep';
   radar.appendChild(radarSweep);
-  const radarCenter = document.createElement('div');
-  radarCenter.className = 'hud-radar-center';
-  radar.appendChild(radarCenter);
+  // 北方位标记（north-up 雷达固定朝上）
+  const radarNorth = document.createElement('div');
+  radarNorth.className = 'hud-radar-north';
+  radarNorth.textContent = 'N';
+  radar.appendChild(radarNorth);
+  // 玩家航向箭头（随机头方向旋转，north-up 模式下不随滚转）
+  const radarHeading = document.createElement('div');
+  radarHeading.className = 'hud-radar-heading';
+  radar.appendChild(radarHeading);
   const radarBlips: HTMLElement[] = [];
   for (let i = 0; i < RADAR_BLIP_POOL; i++) {
     const blip = document.createElement('div');
@@ -203,9 +244,33 @@ export function createHud(root: HTMLElement): Hud {
   }
   root.appendChild(radar);
 
-  // ---- 屏幕空间锁定框 ----
+  // ---- 全目标屏幕标记池（标记框/边缘箭头） ----
+  const markerEls: { root: HTMLElement; box: HTMLElement; arrow: HTMLElement; text: HTMLElement }[] = [];
+  for (let i = 0; i < MARKER_POOL; i++) {
+    const markerRoot = document.createElement('div');
+    markerRoot.className = 'hud-marker';
+    markerRoot.style.display = 'none';
+    const markerBox = document.createElement('div');
+    markerBox.className = 'hud-marker-box';
+    markerRoot.appendChild(markerBox);
+    const markerArrow = document.createElement('div');
+    markerArrow.className = 'hud-marker-arrow';
+    markerRoot.appendChild(markerArrow);
+    const markerText = document.createElement('div');
+    markerText.className = 'hud-marker-text';
+    markerRoot.appendChild(markerText);
+    root.appendChild(markerRoot);
+    markerEls.push({ root: markerRoot, box: markerBox, arrow: markerArrow, text: markerText });
+  }
+
+  // ---- 屏幕空间锁定框（真实战机风格四角框） ----
   const lockBox = document.createElement('div');
   lockBox.className = 'hud-lockbox';
+  for (const corner of ['tl', 'tr', 'bl', 'br'] as const) {
+    const cornerEl = document.createElement('div');
+    cornerEl.className = `hud-lockbox-corner ${corner}`;
+    lockBox.appendChild(cornerEl);
+  }
   const lockLabel = document.createElement('div');
   lockLabel.className = 'hud-lockbox-label';
   lockBox.appendChild(lockLabel);
@@ -240,11 +305,11 @@ export function createHud(root: HTMLElement): Hud {
   crashPanel.appendChild(crashHint);
   root.appendChild(crashPanel);
 
-  // ---- 底部操作提示 ----
+  // ---- 底部操作提示（迭代8 键位重映射后文案） ----
   const chip = document.createElement('div');
   chip.className = 'hud-hint-chip';
   chip.textContent =
-    'W/S 油门 · ↑↓ 俯仰 · A/D 滚转 · 空格 机炮 · F 导弹 · Q 特殊 · C 僚机指令 · E 干扰弹 · R 重置';
+    'W/S 油门 · ↑↓ 俯仰 · A/D 踩舵 · 小键盘4/6 滚转 · 空格 机炮 · F 导弹 · Q 特殊 · C 僚机 · E 干扰弹 · R 重置';
   root.appendChild(chip);
 
   // ---- WebGL 上下文丢失遮罩（默认隐藏） ----
@@ -314,14 +379,19 @@ export function createHud(root: HTMLElement): Hud {
         );
         crashPanel.classList.toggle('is-active', !flight.alive);
 
-        // 雷达光点：池化更新位置与显隐
+        // 雷达光点：池化更新位置与显隐（north-up 固定方位）
         updateRadarBlips(radarBlips, flight.radarBlips);
+        // 玩家航向箭头：绕雷达中心随机头方向旋转（0=正北顺时针）
+        radarHeading.style.transform = `rotate(${flight.playerHeadingDeg.toFixed(1)}deg)`;
       } else {
         stallWarning.classList.remove('is-active');
         missileWarning.classList.remove('is-active');
         lockWarning.classList.remove('is-active');
         crashPanel.classList.remove('is-active');
       }
+
+      // 全目标屏幕标记：池化更新标记框/边缘箭头/来袭导弹
+      updateMarkers(markerEls, stats.markers);
 
       // 锁定框：屏幕空间定位与状态样式
       updateLockBox(lockBox, lockLabel, stats.lock);
@@ -441,13 +511,16 @@ function createWeaponRow(panel: HTMLElement, label: string, initial: string): HT
 /**
  * 更新雷达光点（池化 DOM 复用）
  *
- * 功能：将模拟层雷达光点（米）映射到雷达像素坐标并写入光点池——
- * 不足时隐藏多余光点；敌机红、轰炸机紫红、友军蓝、地面/靶标橙
+ * 功能：将模拟层 north-up 雷达光点（米，东=x / 北=y）映射到雷达
+ * 像素坐标并写入光点池——北（y 正）映射为屏幕上方（负 y 偏移）；
+ * 不足时隐藏多余光点；敌机红、轰炸机紫红、友军蓝、僚机青、
+ * 地面/靶标橙
  * @param blipEls 光点 DOM 池
- * @param blips 本帧雷达光点数据（米，机头朝上坐标）
+ * @param blips 本帧雷达光点数据（米，north-up 固定方位坐标）
  * @returns void
  * 异常：无
- * 注意事项：光点坐标超出池容量时截断（数量远小于池容量）
+ * 注意事项：光点按固定世界方位放置，不随玩家航向/滚转变化；
+ * 超出池容量时截断（数量远小于池容量）
  */
 function updateRadarBlips(
   blipEls: readonly HTMLElement[],
@@ -461,8 +534,9 @@ function updateRadarBlips(
       continue;
     }
     const blip = blips[i]!;
+    // 东(+x)=屏幕右，北(+y)=屏幕上（负 y 偏移）
     const px = (blip.x / RADAR_RANGE_M) * RADAR_RADIUS_PX;
-    const py = (blip.y / RADAR_RANGE_M) * RADAR_RADIUS_PX;
+    const py = -(blip.y / RADAR_RANGE_M) * RADAR_RADIUS_PX;
     el.style.display = 'block';
     el.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px)`;
     el.classList.toggle('is-enemy', blip.kind === 'enemy');
@@ -474,12 +548,72 @@ function updateRadarBlips(
 }
 
 /**
- * 更新屏幕空间锁定框
+ * 更新全目标屏幕标记（池化 DOM 复用）
+ *
+ * 功能：按标记数据写入标记池——视线内目标显示小标记框+距离文本；
+ * 出屏目标隐藏标记框、显示贴边箭头（按 edgeAngleDeg 旋转指向
+ * 转向方向）+距离；来袭导弹为红色高威胁标记（闪烁 + MSL 字样）；
+ * 按种类着色（敌机红/轰炸机紫/友军蓝/僚机青/地面橙/导弹红闪）
+ * @param markerEls 标记 DOM 池
+ * @param markers 本帧标记数据
+ * @returns void
+ * 异常：无
+ * 注意事项：标记元素 translate(-50%,-50%) 居中于目标位置；
+ * 边缘箭头位置由 main.ts 计算并写入 screenX/screenY
+ */
+function updateMarkers(
+  markerEls: readonly {
+    root: HTMLElement;
+    box: HTMLElement;
+    arrow: HTMLElement;
+    text: HTMLElement;
+  }[],
+  markers: readonly HudTargetMarker[],
+): void {
+  const count = Math.min(markers.length, markerEls.length);
+  for (let i = 0; i < markerEls.length; i++) {
+    const widgets = markerEls[i]!;
+    if (i >= count) {
+      widgets.root.style.display = 'none';
+      continue;
+    }
+    const marker = markers[i]!;
+    widgets.root.style.display = 'block';
+    widgets.root.style.left = `${marker.screenX.toFixed(0)}px`;
+    widgets.root.style.top = `${marker.screenY.toFixed(0)}px`;
+
+    // 视线内=标记框+距离；出屏=贴边箭头
+    widgets.box.style.display = marker.onScreen ? 'block' : 'none';
+    widgets.arrow.style.display = marker.onScreen ? 'none' : 'block';
+    if (!marker.onScreen) {
+      widgets.arrow.style.transform = `rotate(${marker.edgeAngleDeg.toFixed(0)}deg)`;
+    }
+
+    // 文本：视线内显示距离（出屏也显示距离辅助判断）；导弹显示 MSL
+    widgets.text.textContent = marker.incoming
+      ? `MSL ${marker.distance.toFixed(0)}m`
+      : `${marker.distance.toFixed(0)}m`;
+
+    // 种类与威胁样式
+    const root = widgets.root;
+    root.classList.toggle('is-enemy', marker.kind === 'enemy');
+    root.classList.toggle('is-bomber', marker.kind === 'bomber');
+    root.classList.toggle('is-ally', marker.kind === 'ally');
+    root.classList.toggle('is-wingman', marker.kind === 'wingman');
+    root.classList.toggle('is-ground', marker.kind === 'ground');
+    root.classList.toggle('is-missile', marker.kind === 'missile' || marker.incoming);
+    root.classList.toggle('is-offscreen', !marker.onScreen);
+  }
+}
+
+/**
+ * 更新屏幕空间锁定框（真实战机风格四角框）
  *
  * 功能：按锁定信息定位锁定框并切换状态样式——
- * locking=黄色虚线框+进度百分比；locked=红色实线框+LOCKED 文案；
+ * locking=黄色四角框（L 形角标线）+LOCK 进度百分比；
+ * locked=红色四角框+距离（米）与目标机型名（真实战机 HUD 风格）；
  * 无目标或目标出屏时隐藏
- * @param lockBox 锁定框元素
+ * @param lockBox 锁定框元素（含四个 corner 子元素）
  * @param lockLabel 锁定框文案元素
  * @param lock 锁定定位数据（null=无目标）
  * @returns void
@@ -502,7 +636,9 @@ function updateLockBox(
   if (lock.state === 'locked') {
     lockBox.classList.remove('is-locking');
     lockBox.classList.add('is-locked');
-    lockLabel.textContent = 'LOCKED';
+    // 真实战机风格：型号名 + 距离（米）
+    const nameText = lock.targetName.length > 0 ? lock.targetName : 'TGT';
+    lockLabel.textContent = `${nameText} ${lock.distance.toFixed(0)}m`;
   } else {
     lockBox.classList.remove('is-locked');
     lockBox.classList.add('is-locking');

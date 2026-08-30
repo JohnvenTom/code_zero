@@ -352,17 +352,30 @@
   }
 }
 
-/* 雷达中心玩家标记 */
-.hud-radar-center {
+/* 雷达北方位标记（north-up 固定朝上） */
+.hud-radar-north {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  color: #7fe0c3;
+  letter-spacing: 0.05em;
+}
+
+/* 雷达玩家航向箭头（随机头方向旋转，north-up 不随滚转） */
+.hud-radar-heading {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 8px;
-  height: 8px;
-  margin: -4px 0 0 -4px;
-  border-top: 2px solid #d7e3ea;
-  border-left: 2px solid #d7e3ea;
-  transform: rotate(45deg);
+  width: 0;
+  height: 0;
+  margin: -5px 0 0 -4px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 9px solid #d7e3ea;
+  transition: transform 0.08s linear;
 }
 
 /* 雷达光点：以中心为原点平移定位 */
@@ -401,27 +414,182 @@
   box-shadow: 0 0 6px rgba(255, 140, 66, 0.7);
 }
 
-/* ---------- 屏幕空间锁定框 ---------- */
+/* ---------- 全目标屏幕标记（标记框/边缘箭头） ---------- */
+.hud-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* 视线内小标记框（默认中性色，种类类显式覆盖） */
+.hud-marker-box {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid #8fa8b8;
+  border-radius: 2px;
+  margin: 0 auto;
+}
+
+/* 出屏贴边箭头（CSS 三角形，rotate 指向转向方向；默认中性色） */
+.hud-marker-arrow {
+  width: 0;
+  height: 0;
+  margin: 0 auto;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 14px solid #8fa8b8;
+}
+
+/* 标记距离文本 */
+.hud-marker-text {
+  margin-top: 3px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: #d7e3ea;
+  white-space: nowrap;
+  text-align: center;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+/* 种类着色：标记框（四边框）与箭头（仅底边实色，侧边保持透明） */
+.hud-marker.is-enemy .hud-marker-box {
+  border-color: #ef476f;
+}
+
+.hud-marker.is-enemy .hud-marker-arrow {
+  border-bottom-color: #ef476f;
+}
+
+.hud-marker.is-bomber .hud-marker-box {
+  border-color: #c74ae0;
+}
+
+.hud-marker.is-bomber .hud-marker-arrow {
+  border-bottom-color: #c74ae0;
+}
+
+.hud-marker.is-ally .hud-marker-box {
+  border-color: #4a9de0;
+}
+
+.hud-marker.is-ally .hud-marker-arrow {
+  border-bottom-color: #4a9de0;
+}
+
+.hud-marker.is-wingman .hud-marker-box {
+  border-color: #7fe0c3;
+}
+
+.hud-marker.is-wingman .hud-marker-arrow {
+  border-bottom-color: #7fe0c3;
+}
+
+.hud-marker.is-ground .hud-marker-box {
+  border-color: #ff8c42;
+}
+
+.hud-marker.is-ground .hud-marker-arrow {
+  border-bottom-color: #ff8c42;
+}
+
+/* 来袭导弹：红色高威胁闪烁 + 醒目放大 */
+.hud-marker.is-missile .hud-marker-box {
+  width: 26px;
+  height: 26px;
+  border-width: 2px;
+  border-color: #ff2d55;
+}
+
+.hud-marker.is-missile .hud-marker-arrow {
+  border-left-width: 10px;
+  border-right-width: 10px;
+  border-bottom-width: 17px;
+  border-bottom-color: #ff2d55;
+}
+
+.hud-marker.is-missile .hud-marker-text {
+  color: #ff2d55;
+  font-weight: 700;
+}
+
+.hud-marker.is-missile {
+  animation: hud-marker-blink 0.45s steps(2, start) infinite;
+}
+
+@keyframes hud-marker-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- 屏幕空间锁定框（真实战机风格四角框） ---------- */
 .hud-lockbox {
   position: absolute;
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   transform: translate(-50%, -50%);
   display: none;
   pointer-events: none;
 }
 
-.hud-lockbox.is-locking {
+.hud-lockbox.is-locking,
+.hud-lockbox.is-locked {
   display: block;
-  border: 2px dashed rgba(255, 209, 102, 0.9);
-  border-radius: 4px;
+}
+
+/* 四角 L 形角标线（边不相连） */
+.hud-lockbox-corner {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+}
+
+.hud-lockbox-corner.tl {
+  top: 0;
+  left: 0;
+  border-top: 2.5px solid;
+  border-left: 2.5px solid;
+}
+
+.hud-lockbox-corner.tr {
+  top: 0;
+  right: 0;
+  border-top: 2.5px solid;
+  border-right: 2.5px solid;
+}
+
+.hud-lockbox-corner.bl {
+  bottom: 0;
+  left: 0;
+  border-bottom: 2.5px solid;
+  border-left: 2.5px solid;
+}
+
+.hud-lockbox-corner.br {
+  bottom: 0;
+  right: 0;
+  border-bottom: 2.5px solid;
+  border-right: 2.5px solid;
+}
+
+/* 待锁定：黄色四角 */
+.hud-lockbox.is-locking .hud-lockbox-corner {
+  border-color: #ffd166;
+}
+
+/* 锁定完成：红色四角 + 呼吸脉冲 */
+.hud-lockbox.is-locked .hud-lockbox-corner {
+  border-color: #ff2d55;
 }
 
 .hud-lockbox.is-locked {
-  display: block;
-  border: 2px solid rgba(239, 71, 111, 0.95);
-  border-radius: 4px;
-  box-shadow: 0 0 14px rgba(239, 71, 111, 0.45);
+  animation: hud-lockbox-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes hud-lockbox-pulse {
+  50% {
+    transform: translate(-50%, -50%) scale(1.1);
+  }
 }
 
 .hud-lockbox-label {
@@ -441,8 +609,8 @@
 }
 
 .hud-lockbox.is-locked .hud-lockbox-label {
-  color: #ef476f;
-  animation: hud-blink 0.5s steps(2, start) infinite;
+  color: #ff2d55;
+  font-weight: 700;
 }
 
 /* ---------- 告警条（失速/导弹来袭/被锁定） ---------- */

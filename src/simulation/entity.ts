@@ -89,6 +89,8 @@ export class SimEntity {
   wingman: WingmanAIState | undefined;
   /** 弹丸范围伤害半径（米；undefined=单体命中。集束破片用） */
   blastRadius: number | undefined;
+  /** 机型标识（敌机/轰炸机的虚构型号名，HUD 锁定框显示用） */
+  designation: string | undefined;
 
   /**
    * 构造模拟实体
@@ -120,6 +122,7 @@ export class SimEntity {
     this.specialPod = undefined;
     this.wingman = undefined;
     this.blastRadius = undefined;
+    this.designation = undefined;
   }
 
   /**

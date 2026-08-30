@@ -4,16 +4,117 @@ import { PerfProbe } from './diagnostics/perf';
 import { createRenderApp, type RenderApp } from './render';
 import { setPlayerFighter } from './render/objects/meshes';
 import { SimulationWorld } from './simulation';
-import { createHud, type Hud, type HudLockInfo } from './ui';
+import type { MarkerInfo } from './simulation';
+import { createHud, type Hud, type HudLockInfo, type HudTargetMarker } from './ui';
 import { createMissionUi, type MissionUi } from './ui';
 import { createHangarUi, type HangarUi } from './ui';
+
+/** 出屏标记贴边余量（像素，距屏幕边缘的安全距离） */
+const EDGE_MARGIN_PX = 70;
+
+/**
+ * 计算出屏目标的屏幕边缘箭头位置与朝向
+ *
+ * 功能：按投影 NDC 方向（相机后方时取反）计算从屏幕中心指向
+ * 目标的射线与屏幕内缩矩形的交点（贴边箭头位置），
+ * 并换算 CSS rotate 朝向角（0=上，顺时针）
+ * @param ndcX 投影 NDC 横坐标
+ * @param ndcY 投影 NDC 纵坐标（NDC y 向上）
+ * @param behind 是否在相机后方（方向须取反）
+ * @returns 贴边坐标（像素）与箭头朝向角（度）；方向退化时返回 null
+ * 异常：无
+ * 注意事项：NDC y 向上而屏幕 y 向下，方向分量已转换；
+ * 交点计算按 x/y 分别缩放取比例较小者（先碰到的边）
+ */
+function computeEdgeIndicator(
+  ndcX: number,
+  ndcY: number,
+  behind: boolean,
+): { x: number; y: number; angleDeg: number } | null {
+  // 相机后方：NDC 方向镜像，取反获得真实方向
+  const dirX = behind ? -ndcX : ndcX;
+  const dirY = behind ? -ndcY : ndcY;
+  if (Math.abs(dirX) < 1e-6 && Math.abs(dirY) < 1e-6) {
+    return null;
+  }
+
+  // 屏幕坐标系：x 右为正，y 下为正（NDC y 向上需取反）
+  const screenDirX = dirX;
+  const screenDirY = -dirY;
+
+  // 射线与内缩屏幕矩形的交点：t 取 x/y 方向碰边比例的较小者
+  const halfW = window.innerWidth / 2 - EDGE_MARGIN_PX;
+  const halfH = window.innerHeight / 2 - EDGE_MARGIN_PX;
+  const tx = Math.abs(screenDirX) > 1e-6 ? halfW / Math.abs(screenDirX) : Infinity;
+  const ty = Math.abs(screenDirY) > 1e-6 ? halfH / Math.abs(screenDirY) : Infinity;
+  const t = Math.min(tx, ty);
+  const edgeX = window.innerWidth / 2 + screenDirX * t;
+  const edgeY = window.innerHeight / 2 + screenDirY * t;
+
+  // CSS rotate 朝向角：0=上，顺时针（atan2(dx, -dy)）
+  const angleDeg = (Math.atan2(screenDirX, -screenDirY) * 180) / Math.PI;
+  return { x: edgeX, y: edgeY, angleDeg };
+}
+
+/**
+ * 组装全目标屏幕标记列表（投影 + 边缘箭头）
+ *
+ * 功能：遍历世界层标记源数据，逐个经渲染层投影为屏幕坐标——
+ * 视线内直接使用目标位置；出屏目标计算贴边箭头位置与朝向
+ * @param flight 玩家飞行快照（含 markers 源数据）
+ * @param renderApp 渲染应用（projectEntity 投影）
+ * @returns HUD 标记列表（供 hud.update 消费）
+ * 异常：无
+ * 注意事项：实体已消亡（无渲染对象）时跳过该标记
+ */
+function assembleMarkers(
+  flight: { markers: readonly MarkerInfo[] } | null,
+  renderApp: RenderApp,
+): HudTargetMarker[] {
+  const result: HudTargetMarker[] = [];
+  if (flight === null) {
+    return result;
+  }
+  for (const info of flight.markers) {
+    const projection = renderApp.projectEntity(info.id);
+    if (projection === null) {
+      continue;
+    }
+    if (projection.onScreen) {
+      result.push({
+        kind: info.kind,
+        screenX: projection.x,
+        screenY: projection.y,
+        onScreen: true,
+        edgeAngleDeg: 0,
+        distance: info.distance,
+        incoming: info.incoming,
+      });
+    } else {
+      const edge = computeEdgeIndicator(projection.ndcX, projection.ndcY, projection.behind);
+      if (edge === null) {
+        continue;
+      }
+      result.push({
+        kind: info.kind,
+        screenX: edge.x,
+        screenY: edge.y,
+        onScreen: false,
+        edgeAngleDeg: edge.angleDeg,
+        distance: info.distance,
+        incoming: info.incoming,
+      });
+    }
+  }
+  return result;
+}
 
 /**
  * 应用引导函数
  *
  * 功能：按层装配全部子系统——键盘输入管理器、DOM HUD、机库选择
- * 界面、任务界面（简报/任务 HUD/结算）、渲染应用（天空/地形/
- * 追尾相机）、性能探针与固定步长主循环；
+ * 界面、任务界面（简报/任务 HUD/结算）、渲染应用（天空/几何云/
+ * 追尾相机/战斗特效）、性能探针与固定步长主循环；
  * 完整流程为：机库选机（3 架机型）→ 按所选机型生成玩家战机 →
  * 任务简报 → 玩家点击开始 → 任务推进 → 胜利/失败结算 → 重开
  * 参数：无
@@ -21,7 +122,8 @@ import { createHangarUi, type HangarUi } from './ui';
  * @throws 容器元素缺失或 WebGL 初始化失败时抛出/向上冒泡异常
  * 注意事项：本函数是唯一的层间装配点，各层内部不互相直接引用；
  * 玩家实体在机库选择完成后才生成（机型决定属性/武器装配）；
- * 模拟事件每帧取出后同时分发给 HUD 与渲染层战斗特效
+ * 模拟事件每帧取出后同时分发给 HUD 与渲染层战斗特效；
+ * 全目标屏幕标记（含出屏边缘箭头与来袭导弹标记）每帧组装
  */
 function bootstrap(): void {
   // ---- core 层：键盘输入管理器（DOM → 纯数据输入快照） ----
@@ -78,7 +180,7 @@ function bootstrap(): void {
       const flight = world.getPlayerFlightData();
       const missionStatus = world.mission.getStatus();
 
-      // 锁定框定位：锁定目标经渲染层投影为屏幕坐标
+      // 锁定框定位：锁定目标经渲染层投影为屏幕坐标（含机型名与距离）
       let lock: HudLockInfo | null = null;
       if (flight !== null && flight.lockTargetId !== null) {
         const projection = renderApp.projectEntity(flight.lockTargetId);
@@ -89,9 +191,14 @@ function bootstrap(): void {
             screenX: projection.x,
             screenY: projection.y,
             onScreen: projection.onScreen,
+            targetName: flight.lockTargetName,
+            distance: flight.lockTargetDistance,
           };
         }
       }
+
+      // 全目标屏幕标记：投影 + 出屏边缘箭头组装
+      const markers = assembleMarkers(flight, renderApp);
 
       // 模拟事件：一次取出，HUD 与战斗特效共享消费
       const events = world.consumeEvents();
@@ -104,6 +211,7 @@ function bootstrap(): void {
         entityCount: world.getEntities().length,
         flight,
         lock,
+        markers,
         events,
       });
 
