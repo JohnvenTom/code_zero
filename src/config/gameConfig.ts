@@ -145,6 +145,9 @@ export interface FlightConfig {
   readonly stallSpeed: number;
   /** 最大平飞速度（m/s） */
   readonly maxSpeed: number;
+  /** 最佳机动速度 corner speed（m/s，该速度下操纵权限最佳 1.0；
+   *  低于则线性衰减至失速速度处的 0.35，高于则缓降至极速处的 0.75） */
+  readonly bestManeuverSpeed: number;
   /** 起飞离地速度（m/s，超过后拉杆可抬前轮/离地） */
   readonly takeoffSpeed: number;
   /** 满油门加速度（m/s²） */
@@ -358,6 +361,16 @@ export interface RadarConfig {
   readonly range: number;
 }
 
+/** 武器装填基准配置（敌机/僚机用；玩家按机型配置表差异化） */
+export interface WeaponReloadConfig {
+  /** 机炮装填时长（秒，弹药打空后整弹匣回满） */
+  readonly gun: number;
+  /** 导弹装填时长（秒） */
+  readonly missile: number;
+  /** 干扰弹装填时长（秒） */
+  readonly flare: number;
+}
+
 /** 僚机配置（Task 16） */
 export interface WingmanConfig {
   /** 僚机数量 */
@@ -493,13 +506,15 @@ export const gameConfig = {
     boundaryPillarColor: 0xffb454,
     boundaryPillarOpacity: 0.55,
   } satisfies EnvironmentConfig,
-  /** 街机飞行模型（迭代9：俯仰基准速率在迭代8 基础上再上调 50%，强化狗斗转向） */
+  /** 街机飞行模型（迭代9：俯仰基准速率在迭代8 基础上再上调 50%，强化狗斗转向；
+   *  迭代10：bestManeuverSpeed 最佳机动速度权限曲线） */
   flight: {
     pitchRateMax: 3.83,
     rollRateMax: 3.2,
     yawRateMax: 0.45,
     stallSpeed: 72,
     maxSpeed: 310,
+    bestManeuverSpeed: 155,
     takeoffSpeed: 82,
     thrustAccel: 46,
     dragCoefficient: 0.00048,
@@ -628,6 +643,12 @@ export const gameConfig = {
   radar: {
     range: 4000,
   } satisfies RadarConfig,
+  /** 武器装填基准（敌机/僚机；玩家按机型差异化，见 fighterConfig） */
+  weaponReload: {
+    gun: 14,
+    missile: 24,
+    flare: 12,
+  } satisfies WeaponReloadConfig,
   /** 僚机系统 */
   wingman: {
     count: 2,

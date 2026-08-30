@@ -19,9 +19,11 @@ const _spawnVelocity = new Vector3();
 const UP = new Vector3(0, 1, 0);
 
 /**
- * 递减干扰弹挂载冷却（单个固定步）
+ * 递减干扰弹挂载冷却与装填倒计时（单个固定步）
  *
- * 功能：推进飞机实体的干扰弹释放冷却计时
+ * 功能：推进飞机实体的干扰弹释放冷却计时；装填中时递减倒计时，
+ * 归零瞬间将干扰弹整弹匣回满（干扰弹计数为 count 字段，
+ * 此处内联适配 ReloadState 的 ammo 语义）
  * @param shooter 挂有干扰弹挂载组件的飞机实体
  * @param dt 固定时间步长（秒）
  * @returns void
@@ -29,21 +31,29 @@ const UP = new Vector3(0, 1, 0);
  */
 export function tickFlarePod(shooter: SimEntity, dt: number): void {
   const pod = shooter.flares;
-  if (pod !== undefined) {
-    pod.cooldown = Math.max(0, pod.cooldown - dt);
+  if (pod === undefined) {
+    return;
+  }
+  pod.cooldown = Math.max(0, pod.cooldown - dt);
+  if (pod.reloadRemain > 0) {
+    pod.reloadRemain -= dt;
+    if (pod.reloadRemain <= 0) {
+      pod.reloadRemain = 0;
+      pod.count = pod.magazine;
+    }
   }
 }
 
 /**
  * 释放干扰弹（玩家与敌机通用）
  *
- * 功能：校验数量与冷却后，在载机后方生成一枚干扰弹实体——
+ * 功能：校验数量、冷却与装填状态后，在载机后方生成一枚干扰弹实体——
  * 初速 = 载机速度 + 机尾方向×向后弹射速度 + 世界向上×向上弹射速度；
- * 数量递减、冷却重置并播报释放事件
+ * 数量递减、冷却重置、打空最后一发自动触发装填倒计时，并播报释放事件
  * @param shooter 释放者飞机实体（须挂有 flares 组件）
  * @param spawnEntity 世界层实体生成回调
  * @param pushEvent 世界层事件播报回调
- * @returns 是否成功释放（数量耗尽/冷却未完时返回 false）
+ * @returns 是否成功释放（数量耗尽/冷却未完/装填中返回 false）
  * 异常：无
  * 注意事项：干扰弹挂在 kind='effect' 上，不参与机炮命中检测；
  * 导弹诱偏系统通过 flare 组件的 ownerId 检索归属
@@ -54,11 +64,21 @@ export function releaseFlares(
   pushEvent: (event: GameEvent) => void,
 ): boolean {
   const pod = shooter.flares;
-  if (pod === undefined || !shooter.alive || pod.count <= 0 || pod.cooldown > 0) {
+  if (
+    pod === undefined ||
+    !shooter.alive ||
+    pod.count <= 0 ||
+    pod.cooldown > 0 ||
+    pod.reloadRemain > 0
+  ) {
     return false;
   }
   pod.count -= 1;
   pod.cooldown = flareCfg.cooldown;
+  // 打空最后一发：自动触发装填（count 适配 ammo 语义）
+  if (pod.count <= 0 && pod.reloadRemain <= 0) {
+    pod.reloadRemain = pod.reloadTime;
+  }
 
   // 生成位置：载机正后方（机尾）
   _back.set(0, 0, 1).applyQuaternion(shooter.quaternion);

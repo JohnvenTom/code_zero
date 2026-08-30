@@ -64,11 +64,51 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * 计算最佳机动速度操纵权限因子（corner speed 曲线）
+ *
+ * 功能：按当前速度相对最佳机动速度的位置计算操纵权限 0..1——
+ * - speed == best：权限 1.0（机动最佳点）；
+ * - stall ≤ speed < best：从失速速度处的 0.35 线性升至 1.0
+ *   （低速权限不足，替换旧 controlAuthorityFloor 低速衰减曲线）；
+ * - speed < stall：钳制在 0.35（失速最低权限，配合机头下压）；
+ * - speed > best：从 1.0 线性缓降至极速处的 0.75（高速略沉重）。
+ * @param speed 当前速度标量（m/s）
+ * @param stallSpeed 失速速度（m/s）
+ * @param bestSpeed 最佳机动速度（m/s）
+ * @param maxSpeed 最大平飞速度（m/s）
+ * @returns 操纵权限因子 0.35..1.0
+ * 异常：无
+ * 注意事项：bestSpeed ≤ stallSpeed 或 maxSpeed ≤ bestSpeed 的
+ * 退化配置按边界值钳制处理，不抛异常
+ */
+export function maneuverAuthorityFactor(
+  speed: number,
+  stallSpeed: number,
+  bestSpeed: number,
+  maxSpeed: number,
+): number {
+  const LOW_AUTHORITY = 0.35;
+  const HIGH_AUTHORITY_FLOOR = 0.75;
+  if (speed <= stallSpeed || bestSpeed <= stallSpeed) {
+    return LOW_AUTHORITY;
+  }
+  if (speed <= bestSpeed) {
+    // 失速速度→最佳速度：0.35 → 1.0 线性上升
+    return LOW_AUTHORITY + (1 - LOW_AUTHORITY) * ((speed - stallSpeed) / (bestSpeed - stallSpeed));
+  }
+  if (maxSpeed <= bestSpeed) {
+    return 1;
+  }
+  // 最佳速度→极速：1.0 → 0.75 线性缓降
+  return 1 - (1 - HIGH_AUTHORITY_FLOOR) * ((speed - bestSpeed) / (maxSpeed - bestSpeed));
+}
+
+/**
  * 姿态角速率街机飞行模型积分（单个固定步）
  *
  * 功能：按“姿态角速率 + 油门 + 速度区间”的自研街机模型推进飞行器一个固定步：
  * 1) 油门积分与杆量平滑；2) 地面滑跑（锁定滚转/偏航、限抬头角、离地判定）；
- * 3) 空中姿态积分（俯仰受 G 限动器约束、失速降权限与机头下压）；
+ * 3) 空中姿态积分（俯仰受 G 限动器约束、最佳机动速度权限曲线与失速机头下压）；
  * 4) 速度标量积分（推力 - 阻力 - 重力沿机头分量）；
  * 5) 位置积分与 G 值计算；6) 坠地判定（坠毁置 alive=false）。
  * 全程使用四元数局部旋转，任意姿态下无万向节死锁；
@@ -81,6 +121,8 @@ function clamp(value: number, min: number, max: number): number {
  * 注意事项：
  * - 前向约定：本体 -Z 为机头；拉杆(+pitch)对应绕局部 X 正向旋转（抬头）；
  *   右滚(+roll)对应绕局部 Z 负向；右偏航(+yaw)对应绕局部 Y 负向；
+ * - 操纵权限由最佳机动速度曲线统一给出（旧 controlAuthorityFloor
+ *   低速权限计算已被替换），G 限动器独立于该因子保持不变；
  * - 坠毁时仅置 alive=false 与 crashed=true，事件由世界层统一播报
  */
 export function integrateAircraftFlight(entity: SimEntity, input: ControlInput, dt: number): void {
@@ -109,11 +151,14 @@ export function integrateAircraftFlight(entity: SimEntity, input: ControlInput, 
     return;
   }
 
-  // ---- 3) 空中失速状态与操纵权限 ----
+  // ---- 3) 空中失速状态与最佳机动速度操纵权限 ----
   ac.stalled = ac.speed < p.stallSpeed;
-  const authority = ac.stalled
-    ? Math.max(cfg.controlAuthorityFloor, ac.speed / p.stallSpeed)
-    : 1;
+  const authority = maneuverAuthorityFactor(
+    ac.speed,
+    p.stallSpeed,
+    p.bestManeuverSpeed,
+    p.maxSpeed,
+  );
 
   // ---- 4) G 限动器：按当前速度限制可用俯仰角速率 ----
   const vSafe = Math.max(ac.speed, 15);

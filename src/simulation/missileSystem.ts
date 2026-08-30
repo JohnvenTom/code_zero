@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import type { Quaternion } from 'three';
 import { gameConfig } from '../config';
 import type { EntityKind, SimEntity } from './entity';
-import { createMissileData, createProjectileData } from './components';
+import { createMissileData, createProjectileData, tickReloadState, triggerReloadIfEmpty } from './components';
 import type { GameEvent } from './events';
 import { applyDamage, orientAlongVelocity } from './gunSystem';
 
@@ -158,9 +158,10 @@ export class LockTracker {
 }
 
 /**
- * 递减导弹挂载冷却（单个固定步）
+ * 递减导弹挂载冷却与装填倒计时（单个固定步）
  *
- * 功能：推进飞机实体的导弹发射冷却计时
+ * 功能：推进飞机实体的导弹发射冷却计时；装填中时递减倒计时，
+ * 归零瞬间将导弹整弹匣回满
  * @param shooter 挂有导弹挂载组件的飞机实体
  * @param dt 固定时间步长（秒）
  * @returns void
@@ -168,21 +169,24 @@ export class LockTracker {
  */
 export function tickMissilePod(shooter: SimEntity, dt: number): void {
   const pod = shooter.missiles;
-  if (pod !== undefined) {
-    pod.cooldown = Math.max(0, pod.cooldown - dt);
+  if (pod === undefined) {
+    return;
   }
+  pod.cooldown = Math.max(0, pod.cooldown - dt);
+  tickReloadState(pod, dt);
 }
 
 /**
  * 发射导弹（玩家与敌机通用）
  *
- * 功能：校验弹药与冷却后，在载机机腹生成导弹实体——初速沿机头方向、
- * 追踪目标为指定实体；弹药递减、冷却重置并播报发射事件
+ * 功能：校验弹药、冷却与装填状态后，在载机机腹生成导弹实体——
+ * 初速沿机头方向、追踪目标为指定实体；弹药递减、冷却重置、
+ * 打空最后一发自动触发装填倒计时，并播报发射事件
  * @param shooter 发射者飞机实体（须挂有 missiles 组件）
  * @param target 追踪目标实体
  * @param spawnProjectile 世界层实体生成回调
  * @param pushEvent 世界层事件播报回调
- * @returns 是否成功发射（弹药耗尽/冷却未完时返回 false）
+ * @returns 是否成功发射（弹药耗尽/冷却未完/装填中返回 false）
  * 异常：无
  * 注意事项：导弹出生位置在机腹下方偏前，避免与载机碰撞体干扰；
  * 导弹寿命由 projectile 组件承载，制导状态由 missile 组件承载
@@ -194,11 +198,18 @@ export function launchMissile(
   pushEvent: (event: GameEvent) => void,
 ): boolean {
   const pod = shooter.missiles;
-  if (pod === undefined || !shooter.alive || pod.ammo <= 0 || pod.cooldown > 0) {
+  if (
+    pod === undefined ||
+    !shooter.alive ||
+    pod.ammo <= 0 ||
+    pod.cooldown > 0 ||
+    pod.reloadRemain > 0
+  ) {
     return false;
   }
   pod.ammo -= 1;
   pod.cooldown = missileCfg.cooldown;
+  triggerReloadIfEmpty(pod);
 
   // 发射位置：机头前下方（机腹挂架）
   _forward.set(0, 0, -1).applyQuaternion(shooter.quaternion);

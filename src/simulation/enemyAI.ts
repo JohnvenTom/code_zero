@@ -205,10 +205,14 @@ export function updateEnemyAI(
         ai.evadeRollDir = Math.random() < 0.5 ? -1 : 1;
       }
 
-      // 能量机动油门
+      // 能量机动油门（低于最佳机动速度时全油门补能量，向 corner speed 收敛）
       if (enemy.aircraft !== undefined) {
         enemy.aircraft.throttle =
-          ai.mode === 'attack' ? dogfightCfg.attackThrottle : dogfightCfg.chaseThrottle;
+          enemy.aircraft.speed < enemy.aircraft.params.bestManeuverSpeed
+            ? 1
+            : ai.mode === 'attack'
+              ? dogfightCfg.attackThrottle
+              : dogfightCfg.chaseThrottle;
       }
       aimAtTarget = ai.mode === 'attack' && targetAlive;
     }

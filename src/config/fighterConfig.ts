@@ -63,6 +63,8 @@ export interface FighterStatsConfig {
   readonly maxSpeed: number;
   /** 失速速度（m/s） */
   readonly stallSpeed: number;
+  /** 最佳机动速度 corner speed（m/s，该速度下操纵权限最佳） */
+  readonly bestManeuverSpeed: number;
   /** 满油门加速度（m/s²） */
   readonly thrustAccel: number;
   /** 气动阻力系数 */
@@ -87,6 +89,14 @@ export interface FighterStatsConfig {
   readonly missileAmmo: number;
   /** 干扰弹基数 */
   readonly flareCount: number;
+  /** 机炮装填时长（秒，弹药打空后整弹匣回满） */
+  readonly gunReloadTime: number;
+  /** 导弹装填时长（秒） */
+  readonly missileReloadTime: number;
+  /** 干扰弹装填时长（秒） */
+  readonly flareReloadTime: number;
+  /** 特殊武器装填时长（秒） */
+  readonly specialReloadTime: number;
 }
 
 /** 单架战机配置 */
@@ -123,6 +133,7 @@ export const fighters: readonly FighterConfig[] = [
     stats: {
       maxSpeed: 300,
       stallSpeed: 66,
+      bestManeuverSpeed: 165,
       thrustAccel: 52,
       dragCoefficient: 0.00058,
       pitchRateMax: 5.0,
@@ -135,6 +146,10 @@ export const fighters: readonly FighterConfig[] = [
       gunAmmo: 550,
       missileAmmo: 10,
       flareCount: 6,
+      gunReloadTime: 12,
+      missileReloadTime: 18,
+      flareReloadTime: 10,
+      specialReloadTime: 24,
     },
     special: {
       type: 'multi-missile',
@@ -155,6 +170,7 @@ export const fighters: readonly FighterConfig[] = [
     stats: {
       maxSpeed: 265,
       stallSpeed: 78,
+      bestManeuverSpeed: 140,
       thrustAccel: 40,
       dragCoefficient: 0.00045,
       pitchRateMax: 2.85,
@@ -167,6 +183,10 @@ export const fighters: readonly FighterConfig[] = [
       gunAmmo: 750,
       missileAmmo: 12,
       flareCount: 8,
+      gunReloadTime: 16,
+      missileReloadTime: 26,
+      flareReloadTime: 14,
+      specialReloadTime: 30,
     },
     special: {
       type: 'cluster-bomb',
@@ -190,6 +210,7 @@ export const fighters: readonly FighterConfig[] = [
     stats: {
       maxSpeed: 340,
       stallSpeed: 72,
+      bestManeuverSpeed: 185,
       thrustAccel: 55,
       dragCoefficient: 0.00048,
       pitchRateMax: 3.75,
@@ -202,6 +223,10 @@ export const fighters: readonly FighterConfig[] = [
       gunAmmo: 600,
       missileAmmo: 12,
       flareCount: 6,
+      gunReloadTime: 14,
+      missileReloadTime: 22,
+      flareReloadTime: 12,
+      specialReloadTime: 26,
     },
     special: {
       type: 'long-range-missile',

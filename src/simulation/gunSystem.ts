@@ -1,7 +1,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { gameConfig } from '../config';
 import type { EntityKind, SimEntity } from './entity';
-import { createProjectileData } from './components';
+import { createProjectileData, tickReloadState, triggerReloadIfEmpty } from './components';
 import type { GameEvent } from './events';
 
 /** 机炮配置的模块级引用 */
@@ -31,10 +31,11 @@ const UP = new Vector3(0, 1, 0);
 /**
  * 更新机炮并按射速发射曳光弹（单个固定步，玩家与敌机通用）
  *
- * 功能：冷却递减；wantFire 为真且弹药充足、冷却归零时生成一发曳光弹：
+ * 功能：冷却与装填倒计时递减（装填归零瞬间整弹匣回满）；
+ * wantFire 为真且弹药充足、冷却归零、未在装填时生成一发曳光弹：
  * 炮口位于机头前方 muzzleOffset 处，初速 = 载机速度 + 弹道方向×炮口初速，
  * 弹道方向 = 瞄准方向（可选，缺省机头）+ 随机锥形散布；
- * 弹丸姿态沿速度方向取向。
+ * 打空最后一发瞬间自动触发装填倒计时。
  * @param shooter 开火的飞机实体（须挂有 gun 组件）
  * @param wantFire 本步是否请求开火（持续按住语义）
  * @param dt 固定时间步长（秒）
@@ -42,7 +43,7 @@ const UP = new Vector3(0, 1, 0);
  * @param aimDir 可选瞄准方向（世界坐标单位向量，AI 前置瞄准用）；缺省用机头方向
  * @returns void
  * 异常：无
- * 注意事项：弹药耗尽时静默停射（HUD 层负责弹药告警显示）；
+ * 注意事项：弹药耗尽且装填中时静默停射（HUD 层显示 RLD 倒计时）；
  * 弹丸的 prev 快照在构造时初始化为出生点，渲染插值天然平滑
  */
 export function updateGun(
@@ -57,12 +58,14 @@ export function updateGun(
     return;
   }
   gun.cooldown = Math.max(0, gun.cooldown - dt);
-  if (!wantFire || gun.cooldown > 0 || gun.ammo <= 0) {
+  tickReloadState(gun, dt);
+  if (!wantFire || gun.cooldown > 0 || gun.ammo <= 0 || gun.reloadRemain > 0) {
     return;
   }
 
   gun.ammo -= 1;
   gun.cooldown = 1 / gunCfg.fireRate;
+  triggerReloadIfEmpty(gun);
 
   // 基准弹道方向：显式瞄准方向或机头方向
   if (aimDir !== undefined) {

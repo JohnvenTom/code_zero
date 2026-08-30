@@ -338,6 +338,22 @@
   line-height: 1.15;
 }
 
+/* 速度处于最佳机动带（±8%）内：速度值变绿提示 */
+.hud-panel-value.is-optimal {
+  color: #5ce65c;
+  text-shadow: 0 0 8px rgba(92, 230, 92, 0.45);
+}
+
+/* ---------- CNR（最佳机动速度指示行） ---------- */
+.hud-cnr {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: #8fa8b8;
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+
 /* ---------- 油门条 ---------- */
 .hud-throttle {
   display: flex;
@@ -412,6 +428,20 @@
 
 .hud-weapon-value.is-empty {
   color: #ef476f;
+}
+
+/* 装填中：琥珀色 RLD 倒计时 */
+.hud-weapon-value.is-reloading {
+  color: #ffb454;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  animation: hud-reload-blink 0.9s ease-in-out infinite;
+}
+
+@keyframes hud-reload-blink {
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .hud-weapon-value.is-low {

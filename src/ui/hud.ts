@@ -176,7 +176,7 @@ export function createHud(root: HTMLElement): Hud {
   gReadout.textContent = 'G 1.0';
   root.appendChild(gReadout);
 
-  // ---- 左侧速度/油门面板 ----
+  // ---- 左侧速度/油门面板（含最佳机动速度 CNR 指示） ----
   const speedPanel = document.createElement('div');
   speedPanel.className = 'hud-panel hud-speed';
   const speedLabel = document.createElement('div');
@@ -185,6 +185,10 @@ export function createHud(root: HTMLElement): Hud {
   const speedValue = document.createElement('div');
   speedValue.className = 'hud-panel-value';
   speedValue.textContent = '0';
+  // CNR（corner speed 最佳机动速度，km/h）：当前速度处于最佳带内时速度值变绿
+  const cnrRow = document.createElement('div');
+  cnrRow.className = 'hud-cnr';
+  cnrRow.textContent = 'CNR --';
   const throttleRow = document.createElement('div');
   throttleRow.className = 'hud-throttle';
   const throttleBar = document.createElement('div');
@@ -199,6 +203,7 @@ export function createHud(root: HTMLElement): Hud {
   throttleRow.appendChild(throttleText);
   speedPanel.appendChild(speedLabel);
   speedPanel.appendChild(speedValue);
+  speedPanel.appendChild(cnrRow);
   speedPanel.appendChild(throttleRow);
   root.appendChild(speedPanel);
 
@@ -358,10 +363,18 @@ export function createHud(root: HTMLElement): Hud {
         gReadout.textContent = `G ${flight.gLoad.toFixed(1)}`;
         throttleFill.style.height = `${Math.round(flight.throttle * 100)}%`;
         throttleText.textContent = `THR ${Math.round(flight.throttle * 100)}%`;
-        gunValue.textContent = `${flight.ammo}`;
-        missileValue.textContent = `${flight.missileAmmo}`;
-        flareValue.textContent = `${flight.flareCount}`;
-        specialValue.textContent = `${flight.specialAmmo}`;
+        // CNR（最佳机动速度 km/h）：当前速度处于最佳带 ±8% 内速度值变绿
+        cnrRow.textContent = `CNR ${flight.bestManeuverSpeedKmh.toFixed(0)}`;
+        const optimalBand = flight.bestManeuverSpeedKmh * 0.08;
+        speedValue.classList.toggle(
+          'is-optimal',
+          Math.abs(flight.speedKmh - flight.bestManeuverSpeedKmh) <= optimalBand,
+        );
+        // 武器面板：装填中显示琥珀色 RLD 倒计时（替换数字位），否则显示弹药数
+        setWeaponValue(gunValue, flight.ammo, flight.gunReloadRemain);
+        setWeaponValue(missileValue, flight.missileAmmo, flight.missileReloadRemain);
+        setWeaponValue(flareValue, flight.flareCount, flight.flareReloadRemain);
+        setWeaponValue(specialValue, flight.specialAmmo, flight.specialReloadRemain);
         hpValue.textContent = `${Math.max(0, Math.round(flight.hp))}`;
         const commandText =
           flight.wingmanCommand === 'attack'
@@ -385,10 +398,6 @@ export function createHud(root: HTMLElement): Hud {
 
         gReadout.classList.toggle('is-high', flight.gLoad >= G_WARN_THRESHOLD);
         gReadout.classList.toggle('is-negative', flight.gLoad < -0.5);
-        gunValue.classList.toggle('is-empty', flight.ammo <= 0);
-        missileValue.classList.toggle('is-empty', flight.missileAmmo <= 0);
-        flareValue.classList.toggle('is-empty', flight.flareCount <= 0);
-        specialValue.classList.toggle('is-empty', flight.specialAmmo <= 0);
         hpValue.classList.toggle('is-low', flight.hp <= flight.hpMax * 0.3);
         stallWarning.classList.toggle('is-active', flight.stalled && flight.alive);
         missileWarning.classList.toggle('is-active', flight.missileWarning && flight.alive);
@@ -531,6 +540,35 @@ function createWeaponRow(panel: HTMLElement, label: string, initial: string): HT
   row.appendChild(valueEl);
   panel.appendChild(row);
   return valueEl;
+}
+
+/**
+ * 写入武器面板数值（弹药数 / 装填倒计时）
+ *
+ * 功能：装填中（reloadRemain 非空且弹药为 0）时显示琥珀色
+ * "RLD 12s" 倒计时（替换数字位置）并挂 is-reloading 样式；
+ * 装填完成恢复正常弹药数字；弹药为 0 且未装填（异常态）挂 is-empty
+ * @param valueEl 武器行数值元素
+ * @param ammo 当前弹药数
+ * @param reloadRemain 装填剩余秒数（装填中为正数；未装填为 null）
+ * @returns void
+ * 异常：无
+ * 注意事项：is-empty 与 is-reloading 互斥——装填中显示 RLD
+ * 优先于打空告警
+ */
+function setWeaponValue(
+  valueEl: HTMLElement,
+  ammo: number,
+  reloadRemain: number | null,
+): void {
+  const reloading = reloadRemain !== null && ammo <= 0;
+  if (reloading) {
+    valueEl.textContent = `RLD ${Math.ceil(reloadRemain)}s`;
+  } else {
+    valueEl.textContent = `${ammo}`;
+  }
+  valueEl.classList.toggle('is-reloading', reloading);
+  valueEl.classList.toggle('is-empty', ammo <= 0 && !reloading);
 }
 
 /**

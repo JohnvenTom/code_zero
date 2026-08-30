@@ -22,6 +22,8 @@ export interface FlightParameters {
   readonly maxSpeed: number;
   /** 失速速度（m/s） */
   readonly stallSpeed: number;
+  /** 最佳机动速度 corner speed（m/s，该速度下操纵权限最佳 1.0） */
+  readonly bestManeuverSpeed: number;
   /** 满油门加速度（m/s²） */
   readonly thrustAccel: number;
   /** 气动阻力系数 */
@@ -52,6 +54,7 @@ export function createFlightParameters(stats?: FighterStatsConfig): FlightParame
   return {
     maxSpeed: stats?.maxSpeed ?? base.maxSpeed,
     stallSpeed: stats?.stallSpeed ?? base.stallSpeed,
+    bestManeuverSpeed: stats?.bestManeuverSpeed ?? base.bestManeuverSpeed,
     thrustAccel: stats?.thrustAccel ?? base.thrustAccel,
     dragCoefficient: stats?.dragCoefficient ?? base.dragCoefficient,
     pitchRateMax: stats?.pitchRateMax ?? base.pitchRateMax,
@@ -144,9 +147,81 @@ export function createHealthData(hp: number, hitRadius: number): HealthData {
 }
 
 /**
+ * 通用武器装填状态（各武器 pod 组件的内嵌字段组）
+ *
+ * 功能：承载"打空自动装填"机制的运行时状态——弹匣容量、
+ * 装填时长与装填剩余倒计时；由各武器系统的 tick 函数推进
+ */
+export interface ReloadState {
+  /** 弹匣容量（装填完成后回满到的弹药数） */
+  magazine: number;
+  /** 装填时长（秒，打空触发时装填所需总时长） */
+  reloadTime: number;
+  /** 装填剩余倒计时（秒；0=未在装填，>0=装填中无法发射） */
+  reloadRemain: number;
+}
+
+/**
+ * 推进武器装填倒计时（各武器 tick 函数共用）
+ *
+ * 功能：装填中时递减倒计时，归零瞬间将弹药回满整个弹匣；
+ * 未在装填时无操作
+ * @param pod 带弹药计数与装填状态的武器 pod（须含 ammo 与 ReloadState 字段）
+ * @param dt 固定时间步长（秒）
+ * @returns void
+ * 异常：无
+ * 注意事项：弹药字段名约定为 ammo（干扰弹为 count 由调用方适配）；
+ * 装填完成后 reloadRemain 归零，发射条件恢复
+ */
+export function tickReloadState(
+  pod: { ammo: number } & ReloadState,
+  dt: number,
+): void {
+  if (pod.reloadRemain <= 0) {
+    return;
+  }
+  pod.reloadRemain -= dt;
+  if (pod.reloadRemain <= 0) {
+    pod.reloadRemain = 0;
+    pod.ammo = pod.magazine;
+  }
+}
+
+/**
+ * 弹药打空时触发装填（各武器发射函数共用）
+ *
+ * 功能：发射消耗弹药后调用——若弹药归零则启动装填倒计时
+ * @param pod 带弹药计数与装填状态的武器 pod
+ * @returns void
+ * 异常：无
+ * 注意事项：仅在发射成功扣弹后调用（退还弹药的场景须先调
+ * clearReloadIfNotEmpty 清除误触发的装填）
+ */
+export function triggerReloadIfEmpty(pod: { ammo: number } & ReloadState): void {
+  if (pod.ammo <= 0 && pod.reloadRemain <= 0) {
+    pod.reloadRemain = pod.reloadTime;
+  }
+}
+
+/**
+ * 弹药非空时清除装填状态（退还弹药的发射路径用）
+ *
+ * 功能：多目标导弹等"扣弹后可能退还"的发射路径在退还成功后调用，
+ * 清除扣弹瞬间误触发的装填倒计时
+ * @param pod 带弹药计数与装填状态的武器 pod
+ * @returns void
+ * 异常：无
+ */
+export function clearReloadIfNotEmpty(pod: { ammo: number } & ReloadState): void {
+  if (pod.ammo > 0) {
+    pod.reloadRemain = 0;
+  }
+}
+
+/**
  * 机炮组件（挂在具备机炮武器的实体上）
  */
-export interface GunData {
+export interface GunData extends ReloadState {
   /** 剩余弹药数 */
   ammo: number;
   /** 距离下一发可发射的冷却剩余时间（秒） */
@@ -157,12 +232,13 @@ export interface GunData {
  * 创建满弹药的机炮组件
  *
  * @param ammo 初始弹药数（来自武器配置表）
+ * @param reloadTime 装填时长（秒，打空后整弹匣回满）
  * @returns 机炮组件
  * 异常：无
- * 注意事项：冷却初始为 0，生成后立即可开火
+ * 注意事项：冷却与装填倒计时初始为 0，生成后立即可开火
  */
-export function createGunData(ammo: number): GunData {
-  return { ammo, cooldown: 0 };
+export function createGunData(ammo: number, reloadTime: number): GunData {
+  return { ammo, cooldown: 0, magazine: ammo, reloadTime, reloadRemain: 0 };
 }
 
 /**
@@ -202,9 +278,9 @@ export function createProjectileData(
 /**
  * 导弹挂载组件（挂在具备导弹武器的飞机实体上）
  *
- * 功能：承载导弹弹药计数与发射冷却状态
+ * 功能：承载导弹弹药计数、发射冷却与自动装填状态
  */
-export interface MissilesData {
+export interface MissilesData extends ReloadState {
   /** 剩余导弹数 */
   ammo: number;
   /** 距下一发可发射的冷却剩余时间（秒） */
@@ -215,12 +291,13 @@ export interface MissilesData {
  * 创建满弹药的导弹挂载组件
  *
  * @param ammo 初始导弹数（来自导弹配置表）
+ * @param reloadTime 装填时长（秒，打空后整弹匣回满）
  * @returns 导弹挂载组件
  * 异常：无
- * 注意事项：冷却初始为 0，生成后立即可发射（锁定完成后）
+ * 注意事项：冷却与装填倒计时初始为 0，生成后立即可发射（锁定完成后）
  */
-export function createMissilesData(ammo: number): MissilesData {
-  return { ammo, cooldown: 0 };
+export function createMissilesData(ammo: number, reloadTime: number): MissilesData {
+  return { ammo, cooldown: 0, magazine: ammo, reloadTime, reloadRemain: 0 };
 }
 
 /**
@@ -266,9 +343,11 @@ export function createMissileData(targetId: number, speed: number): MissileData 
 
 /**
  * 干扰弹挂载组件（挂在具备干扰弹的飞机实体上）
+ *
+ * 功能：承载干扰弹计数、释放冷却与自动装填状态
  */
-export interface FlaresData {
-  /** 剩余干扰弹数 */
+export interface FlaresData extends ReloadState {
+  /** 剩余干扰弹数（装填回满目标，与 ReloadState 约定的 ammo 字段对应） */
   count: number;
   /** 距下一次可释放的冷却剩余时间（秒） */
   cooldown: number;
@@ -278,11 +357,12 @@ export interface FlaresData {
  * 创建满载干扰弹挂载组件
  *
  * @param count 初始干扰弹数（来自干扰弹配置表）
+ * @param reloadTime 装填时长（秒，打空后整弹匣回满）
  * @returns 干扰弹挂载组件
  * 异常：无
  */
-export function createFlaresData(count: number): FlaresData {
-  return { count, cooldown: 0 };
+export function createFlaresData(count: number, reloadTime: number): FlaresData {
+  return { count, cooldown: 0, magazine: count, reloadTime, reloadRemain: 0 };
 }
 
 /**
@@ -371,10 +451,10 @@ export function createWingmanAIState(): WingmanAIState {
 /**
  * 特殊武器挂载组件（挂在玩家实体上）
  *
- * 功能：承载特殊武器弹药与发射冷却、当前特殊武器配置引用
- * （由所选机型决定，见 specialWeaponSystem.ts）
+ * 功能：承载特殊武器弹药、发射冷却、自动装填状态与
+ * 当前特殊武器配置引用（由所选机型决定，见 specialWeaponSystem.ts）
  */
-export interface SpecialWeaponPod {
+export interface SpecialWeaponPod extends ReloadState {
   /** 剩余弹药数（多目标导弹按"次"计，一次齐射消耗 1） */
   ammo: number;
   /** 发射冷却剩余时间（秒） */

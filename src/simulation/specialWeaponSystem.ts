@@ -2,7 +2,14 @@ import { Vector3 } from 'three';
 import { gameConfig } from '../config';
 import type { FighterConfig, SpecialWeaponConfig } from '../config';
 import type { EntityKind, SimEntity } from './entity';
-import { createMissileData, createProjectileData, type SpecialWeaponPod } from './components';
+import {
+  createMissileData,
+  createProjectileData,
+  clearReloadIfNotEmpty,
+  tickReloadState,
+  triggerReloadIfEmpty,
+  type SpecialWeaponPod,
+} from './components';
 import type { GameEvent } from './events';
 import { orientAlongVelocity } from './gunSystem';
 
@@ -23,17 +30,26 @@ const _spawnVelocity = new Vector3();
 /**
  * 创建特殊武器挂载组件
  *
- * @param fighter 所选战机配置
+ * @param fighter 所选战机配置（提供弹药基数与机型装填时长）
  * @returns 特殊武器挂载组件
  * 异常：无
  */
 export function createSpecialWeaponPod(fighter: FighterConfig): SpecialWeaponPod {
-  return { ammo: fighter.special.ammo, cooldown: 0, config: fighter.special };
+  return {
+    ammo: fighter.special.ammo,
+    cooldown: 0,
+    magazine: fighter.special.ammo,
+    reloadTime: fighter.stats.specialReloadTime,
+    reloadRemain: 0,
+    config: fighter.special,
+  };
 }
 
 /**
- * 递减特殊武器冷却（单个固定步）
+ * 递减特殊武器冷却与装填倒计时（单个固定步）
  *
+ * 功能：推进发射冷却；装填中时递减倒计时，归零瞬间
+ * 将特殊武器弹药整弹匣回满
  * @param pod 特殊武器挂载组件
  * @param dt 固定时间步长（秒）
  * @returns void
@@ -41,6 +57,7 @@ export function createSpecialWeaponPod(fighter: FighterConfig): SpecialWeaponPod
  */
 export function tickSpecialWeapon(pod: SpecialWeaponPod, dt: number): void {
   pod.cooldown = Math.max(0, pod.cooldown - dt);
+  tickReloadState(pod, dt);
 }
 
 /**
@@ -52,7 +69,8 @@ export function tickSpecialWeapon(pod: SpecialWeaponPod, dt: number): void {
  * 2) cluster-bomb：机腹向前下方抛撒 bombletCount 枚破片，
  *    破片为范围伤害弹丸（落点附近 blastRadius 内目标结算伤害）；
  * 3) long-range-missile：对锁定目标发射一枚高速远程导弹。
- * 冷却未完或弹药耗尽时静默失败。
+ * 冷却未完、弹药耗尽或装填中时静默失败；打空最后一发自动
+ * 触发装填倒计时（多目标导弹退还弹药时清除误触发的装填）。
  * @param player 玩家实体（须挂有 specialPod 与 lockTarget）
  * @param lockTargetId 锁定追踪器当前目标 ID（无锁定时 null，
  *        多目标/远程导弹需要锁定；集束炸弹无需锁定）
@@ -72,12 +90,19 @@ export function launchSpecialWeapon(
   pushEvent: (event: GameEvent) => void,
 ): boolean {
   const pod = player.specialPod;
-  if (pod === undefined || !player.alive || pod.ammo <= 0 || pod.cooldown > 0) {
+  if (
+    pod === undefined ||
+    !player.alive ||
+    pod.ammo <= 0 ||
+    pod.cooldown > 0 ||
+    pod.reloadRemain > 0
+  ) {
     return false;
   }
   const config = pod.config;
   pod.ammo -= 1;
   pod.cooldown = 1.6;
+  triggerReloadIfEmpty(pod);
   pushEvent({
     type: 'special-launched',
     position: player.position.clone(),
@@ -202,6 +227,8 @@ function launchMultiMissile(
     const pod = player.specialPod;
     if (pod !== undefined) {
       pod.ammo += 1;
+      // 退还成功：清除扣弹瞬间误触发的装填倒计时
+      clearReloadIfNotEmpty(pod);
     }
     return false;
   }

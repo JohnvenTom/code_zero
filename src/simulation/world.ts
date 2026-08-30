@@ -40,6 +40,8 @@ const radarCfg = gameConfig.radar;
 const mCfg = campaignMission1;
 /** 僚机配置的模块级引用 */
 const wingmanCfg = gameConfig.wingman;
+/** 武器装填基准（敌机/僚机用） */
+const reloadCfg = gameConfig.weaponReload;
 
 /** 僚机指令循环顺序 */
 const WINGMAN_COMMAND_CYCLE: readonly WingmanCommand[] = ['formation', 'attack', 'cover'];
@@ -137,6 +139,16 @@ export interface PlayerFlightSnapshot {
   readonly specialAmmoMax: number;
   /** 特殊武器类型（HUD 图标/提示用） */
   readonly specialType: string;
+  /** 机炮装填剩余秒数（装填中为正数；未装填为 null） */
+  readonly gunReloadRemain: number | null;
+  /** 导弹装填剩余秒数（装填中为正数；未装填为 null） */
+  readonly missileReloadRemain: number | null;
+  /** 干扰弹装填剩余秒数（装填中为正数；未装填为 null） */
+  readonly flareReloadRemain: number | null;
+  /** 特殊武器装填剩余秒数（装填中为正数；未装填为 null） */
+  readonly specialReloadRemain: number | null;
+  /** 最佳机动速度 corner speed（km/h，HUD CNR 指示显示） */
+  readonly bestManeuverSpeedKmh: number;
   /** 机型代号（HUD/结算展示） */
   readonly fighterName: string;
   /** 僚机指令（HUD 指令显示） */
@@ -230,9 +242,9 @@ export class SimulationWorld {
     entity.variant = 'player';
     entity.aircraft = createAircraftData(true, fighter.stats);
     entity.health = createHealthData(fighter.stats.hp, playerCfg.hitRadius);
-    entity.gun = createGunData(fighter.stats.gunAmmo);
-    entity.missiles = createMissilesData(fighter.stats.missileAmmo);
-    entity.flares = createFlaresData(fighter.stats.flareCount);
+    entity.gun = createGunData(fighter.stats.gunAmmo, fighter.stats.gunReloadTime);
+    entity.missiles = createMissilesData(fighter.stats.missileAmmo, fighter.stats.missileReloadTime);
+    entity.flares = createFlaresData(fighter.stats.flareCount, fighter.stats.flareReloadTime);
     entity.specialPod = createSpecialWeaponPod(fighter);
     this.player = entity;
     return entity;
@@ -278,9 +290,9 @@ export class SimulationWorld {
       entity.variant = 'wingman';
       entity.aircraft = createAircraftData(true);
       entity.health = createHealthData(wingmanCfg.hp, wingmanCfg.hitRadius);
-      entity.gun = createGunData(wingmanCfg.gunAmmo);
-      entity.missiles = createMissilesData(wingmanCfg.missileAmmo);
-      entity.flares = createFlaresData(flareCfg.count);
+      entity.gun = createGunData(wingmanCfg.gunAmmo, reloadCfg.gun);
+      entity.missiles = createMissilesData(wingmanCfg.missileAmmo, reloadCfg.missile);
+      entity.flares = createFlaresData(flareCfg.count, reloadCfg.flare);
       entity.wingman = createWingmanAIState();
       entity.wingman.command = this.wingmanCommand;
       created.push(entity);
@@ -384,9 +396,9 @@ export class SimulationWorld {
           entity.aircraft.throttle = 0.8;
         }
         entity.health = createHealthData(enemyCfg.hp, enemyCfg.hitRadius);
-        entity.gun = createGunData(enemyCfg.gunAmmo);
-        entity.missiles = createMissilesData(enemyCfg.missileAmmo);
-        entity.flares = createFlaresData(flareCfg.count);
+        entity.gun = createGunData(enemyCfg.gunAmmo, reloadCfg.gun);
+        entity.missiles = createMissilesData(enemyCfg.missileAmmo, reloadCfg.missile);
+        entity.flares = createFlaresData(flareCfg.count, reloadCfg.flare);
         entity.ai = createEnemyAIState();
         entity.designation =
           enemyCfg.typeNames[this.enemyTypeIndex % enemyCfg.typeNames.length] ?? 'Foe';
@@ -690,9 +702,18 @@ export class SimulationWorld {
     player.velocity.set(0, 0, 0);
     player.aircraft = createAircraftData(true, fighter?.stats);
     player.health = createHealthData(fighter?.stats.hp ?? playerCfg.hp, playerCfg.hitRadius);
-    player.gun = createGunData(fighter?.stats.gunAmmo ?? gunCfg.ammo);
-    player.missiles = createMissilesData(fighter?.stats.missileAmmo ?? missileCfg.ammo);
-    player.flares = createFlaresData(fighter?.stats.flareCount ?? flareCfg.count);
+    player.gun = createGunData(
+      fighter?.stats.gunAmmo ?? gunCfg.ammo,
+      fighter?.stats.gunReloadTime ?? reloadCfg.gun,
+    );
+    player.missiles = createMissilesData(
+      fighter?.stats.missileAmmo ?? missileCfg.ammo,
+      fighter?.stats.missileReloadTime ?? reloadCfg.missile,
+    );
+    player.flares = createFlaresData(
+      fighter?.stats.flareCount ?? flareCfg.count,
+      fighter?.stats.flareReloadTime ?? reloadCfg.flare,
+    );
     if (fighter !== null) {
       player.specialPod = createSpecialWeaponPod(fighter);
     }
@@ -751,8 +772,9 @@ export class SimulationWorld {
    * 生成玩家飞行快照（HUD 视图数据）
    *
    * 功能：将玩家实体与组件状态投影为扁平只读结构；计算锁定状态
-   * （含锁定目标机型名与距离）、导弹来袭/被瞄准告警、玩家航向角；
-   * 遍历全部敌方/友方目标生成 north-up 固定方位雷达光点
+   * （含锁定目标机型名与距离）、导弹来袭/被瞄准告警、玩家航向角、
+   * 各武器装填剩余倒计时（装填中为秒数，否则 null）与最佳机动速度
+   * （km/h）；遍历全部敌方/友方目标生成 north-up 固定方位雷达光点
    * （世界东=x 右 / 世界北=y 上，不随玩家航向滚转）与
    * 全目标屏幕标记列表（含来袭导弹）
    * @returns 玩家飞行快照；玩家未生成时返回 null
@@ -892,6 +914,20 @@ export class SimulationWorld {
       specialAmmo: player.specialPod?.ammo ?? 0,
       specialAmmoMax: player.specialPod?.config.ammo ?? 0,
       specialType: player.specialPod?.config.type ?? '',
+      gunReloadRemain: player.gun !== undefined && player.gun.reloadRemain > 0 ? player.gun.reloadRemain : null,
+      missileReloadRemain:
+        player.missiles !== undefined && player.missiles.reloadRemain > 0
+          ? player.missiles.reloadRemain
+          : null,
+      flareReloadRemain:
+        player.flares !== undefined && player.flares.reloadRemain > 0
+          ? player.flares.reloadRemain
+          : null,
+      specialReloadRemain:
+        player.specialPod !== undefined && player.specialPod.reloadRemain > 0
+          ? player.specialPod.reloadRemain
+          : null,
+      bestManeuverSpeedKmh: (player.aircraft?.params.bestManeuverSpeed ?? gameConfig.flight.bestManeuverSpeed) * 3.6,
       fighterName: this.playerFighter?.name ?? '',
       wingmanCommand: this.wingmanCommand,
       wingmenAlive,
