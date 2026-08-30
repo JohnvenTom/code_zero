@@ -19,16 +19,14 @@ export interface ControlInput {
   readonly throttleUp: boolean;
   /** 是否按住油门减小键 */
   readonly throttleDown: boolean;
-  /** 是否按住机炮开火键 */
+  /** 是否按住发射键（空格：按当前选中武器持续/单发射） */
   readonly fire: boolean;
-  /** 是否请求发射导弹（边沿触发，仅单个固定步为 true） */
-  readonly missile: boolean;
+  /** 是否请求循环切换武器（R 键边沿触发，仅单个固定步为 true） */
+  readonly cycleWeapon: boolean;
+  /** 是否请求切换锁定目标（X 键边沿触发，仅单个固定步为 true） */
+  readonly switchTarget: boolean;
   /** 是否请求释放干扰弹（边沿触发，仅单个固定步为 true） */
   readonly flare: boolean;
-  /** 是否请求发射特殊武器（边沿触发，仅单个固定步为 true） */
-  readonly special: boolean;
-  /** 是否请求切换特殊武器（边沿触发，仅单个固定步为 true） */
-  readonly cycleSpecial: boolean;
   /** 是否请求循环僚机指令（边沿触发，仅单个固定步为 true；仅玩家使用） */
   readonly wingmanCommand: boolean;
   /** 是否请求重置（边沿触发，仅单个固定步为 true；仅玩家使用） */

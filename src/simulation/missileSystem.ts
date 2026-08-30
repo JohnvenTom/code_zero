@@ -48,31 +48,48 @@ export class LockTracker {
   private holdTime = 0;
   /** 锁定是否完成 */
   private locked = false;
+  /** 手动目标切换偏移（X 键循环候选列表用；0=自动选最佳） */
+  private manualIndex = 0;
 
   /**
-   * 更新锁定状态（单个固定步）
+   * 手动循环切换锁定目标（X 键边沿触发）
    *
-   * 功能：扫描锁定锥内候选目标→选择锥角最近者→累计/重置保持时间→
-   * 完成锁定或丢失锁定时播报事件
-   * @param player 玩家实体（存活状态由调用方保证）
-   * @param entities 世界实体列表（候选目标来源）
-   * @param dt 固定时间步长（秒）
-   * @param pushEvent 世界层事件播报回调
-   * @returns void
+   * 功能：收集锁定锥内全部候选（按锥角排序），将手动索引偏移 +1
+   * 并循环回绕；下次 update 时按 manualIndex 选取候选；
+   * 锁定进度随目标切换清零
+   * @param player 玩家实体
+   * @param entities 世界实体列表
+   * @returns 是否切换成功（锥内无候选或多候选不足时返回 false）
    * 异常：无
-   * 注意事项：目标在锥内但已死亡时立即丢失；切换候选目标时进度清零
+   * 注意事项：候选不足 2 个时无切换意义，返回 false；
+   * 切换后锁定状态重置为未锁定（需重新保持锁定时间）
    */
-  update(
-    player: SimEntity,
-    entities: readonly SimEntity[],
-    dt: number,
-    pushEvent: (event: GameEvent) => void,
-  ): void {
-    _forward.set(0, 0, -1).applyQuaternion(player.quaternion);
+  cycleTarget(player: SimEntity, entities: readonly SimEntity[]): boolean {
+    const candidates = this.collectCandidates(player, entities);
+    if (candidates.length < 2) {
+      return false;
+    }
+    this.manualIndex = (this.manualIndex + 1) % candidates.length;
+    // 手动切换后清除当前锁定，update 将按 manualIndex 重选
+    this.targetId = null;
+    this.holdTime = 0;
+    this.locked = false;
+    return true;
+  }
 
-    // 扫描锁定锥内候选：选机头夹角最小（余弦最大）者
-    let bestId: number | null = null;
-    let bestCos = LOCK_CONE_COS;
+  /**
+   * 收集锁定锥内全部候选目标（按锥角降序=机头夹角升序，私有）
+   *
+   * 功能：扫描锁定锥与射程内的全部可锁定实体（挂生命值且存活），
+   * 按机头夹角余弦降序排列（最接近机头者在前）
+   * @param player 玩家实体
+   * @param entities 世界实体列表
+   * @returns 候选实体 ID 列表（空=锥内无目标）
+   * 异常：无
+   */
+  private collectCandidates(player: SimEntity, entities: readonly SimEntity[]): number[] {
+    _forward.set(0, 0, -1).applyQuaternion(player.quaternion);
+    const candidates: { id: number; cos: number }[] = [];
     for (const candidate of entities) {
       if (candidate === player || !candidate.alive || candidate.health === undefined) {
         continue;
@@ -84,17 +101,47 @@ export class LockTracker {
       }
       _toTarget.divideScalar(distance);
       const cosAngle = _toTarget.dot(_forward);
-      if (cosAngle > bestCos) {
-        bestCos = cosAngle;
-        bestId = candidate.id;
+      if (cosAngle > LOCK_CONE_COS) {
+        candidates.push({ id: candidate.id, cos: cosAngle });
       }
     }
+    candidates.sort((a, b) => b.cos - a.cos);
+    return candidates.map((c) => c.id);
+  }
 
-    if (bestId === null) {
-      // 锥内无目标：丢失锁定（若有）
+  /**
+   * 更新锁定状态（单个固定步）
+   *
+   * 功能：扫描锁定锥内候选目标→按手动索引偏移选取（manualIndex=0
+   * 时自动选锥角最近者）→累计/重置保持时间→完成锁定或丢失锁定
+   * 时播报事件
+   * @param player 玩家实体（存活状态由调用方保证）
+   * @param entities 世界实体列表（候选目标来源）
+   * @param dt 固定时间步长（秒）
+   * @param pushEvent 世界层事件播报回调
+   * @returns void
+   * 异常：无
+   * 注意事项：目标在锥内但已死亡时立即丢失；切换候选目标时进度清零；
+   * 手动切换（cycleTarget）后自动回退到手动指定的候选
+   */
+  update(
+    player: SimEntity,
+    entities: readonly SimEntity[],
+    dt: number,
+    pushEvent: (event: GameEvent) => void,
+  ): void {
+    const candidateIds = this.collectCandidates(player, entities);
+
+    if (candidateIds.length === 0) {
+      // 锥内无目标：丢失锁定（若有），手动偏移重置
+      this.manualIndex = 0;
       this.loseLock(pushEvent);
       return;
     }
+    // 按手动索引选取候选（越界回绕钳制到自动最佳）
+    const index = Math.min(this.manualIndex, candidateIds.length - 1);
+    const bestId = candidateIds[index]!;
+
     if (this.targetId !== bestId) {
       // 切换候选目标：进度清零重新累计
       this.targetId = bestId;
@@ -154,6 +201,7 @@ export class LockTracker {
     this.targetId = null;
     this.holdTime = 0;
     this.locked = false;
+    this.manualIndex = 0;
   }
 }
 

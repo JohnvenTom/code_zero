@@ -37,4 +37,10 @@ export type GameEvent =
       readonly type: 'wingman-command';
       /** 新指令（HUD 指令显示用） */
       readonly command: WingmanCommand;
-    };
+    }
+  | {
+      readonly type: 'weapon-switched';
+      /** 新选中的武器类型（HUD 提示与高亮用） */
+      readonly weapon: 'gun' | 'missile' | 'special';
+    }
+  | { readonly type: 'lock-target-switched' };

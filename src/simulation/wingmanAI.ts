@@ -45,10 +45,9 @@ const IDLE_CONTROL: ControlInput = {
   throttleUp: false,
   throttleDown: false,
   fire: false,
-  missile: false,
+  cycleWeapon: false,
+  switchTarget: false,
   flare: false,
-  special: false,
-  cycleSpecial: false,
   wingmanCommand: false,
   reset: false,
 };

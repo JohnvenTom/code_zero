@@ -95,26 +95,7 @@
   transform: translate(var(--cs-spread), -50%);
 }
 
-/* 旋转刻度环：repeating-conic 刻度 + mask 挖环形，常速旋转 */
-.hud-crosshair-ring {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 72px;
-  height: 72px;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: repeating-conic-gradient(
-    var(--cs-color) 0deg 1.5deg,
-    transparent 1.5deg 11.25deg
-  );
-  -webkit-mask: radial-gradient(circle, transparent 33px, #000 34px, #000 35px, transparent 36px);
-  mask: radial-gradient(circle, transparent 33px, #000 34px, #000 35px, transparent 36px);
-  opacity: 0.4;
-  animation: hud-cs-spin 14s linear infinite;
-}
-
-/* 中心发光点 */
+/* 中心发光点（迭代11：旋转刻度环已删除） */
 .hud-crosshair-dot {
   position: absolute;
   left: 0;
@@ -133,15 +114,10 @@
   --cs-glow: rgba(255, 209, 102, 0.5);
 }
 
-/* 锁定完成：红色 + 环加速 + 中心点脉冲 */
+/* 锁定完成：红色 + 中心点脉冲（迭代11：刻度环已删除） */
 .hud-crosshair.is-locked {
   --cs-color: rgba(239, 71, 111, 0.98);
   --cs-glow: rgba(239, 71, 111, 0.6);
-}
-
-.hud-crosshair.is-locked .hud-crosshair-ring {
-  animation-duration: 3s;
-  opacity: 0.85;
 }
 
 .hud-crosshair.is-locked .hud-crosshair-dot {
@@ -167,15 +143,6 @@
   }
   75% {
     transform: translate(calc(var(--cs-jitter) * 0.7), calc(var(--cs-jitter) * -1));
-  }
-}
-
-@keyframes hud-cs-spin {
-  from {
-    rotate: 0deg;
-  }
-  to {
-    rotate: 360deg;
   }
 }
 
@@ -541,6 +508,67 @@
 .hud-radar-blip.is-ground {
   background: #ff8c42;
   box-shadow: 0 0 6px rgba(255, 140, 66, 0.7);
+}
+
+/* ---------- COD 风格得分弹出 ---------- */
+.hud-score {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: Consolas, 'Courier New', monospace;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+/* 命中：小号白色 */
+.hud-score.is-hit {
+  font-size: 14px;
+  color: #f0f4f8;
+}
+
+/* 击坠：大号金色 */
+.hud-score.is-kill {
+  font-size: 20px;
+  color: #ffd166;
+  text-shadow: 0 0 10px rgba(255, 209, 102, 0.5);
+}
+
+.hud-score.is-active {
+  animation: hud-score-float 0.8s ease-out forwards;
+}
+
+@keyframes hud-score-float {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateY(-40px);
+  }
+}
+
+/* ---------- 天气屏幕白闪（闪电触发） ---------- */
+.hud-weather-flash {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- 武器面板选中高亮 ---------- */
+.hud-weapon-row.is-selected {
+  background: rgba(255, 209, 102, 0.08);
+  border-radius: 3px;
+}
+
+.hud-weapon-row.is-selected::before {
+  content: '▶ ';
+  color: #ffd166;
+  font-size: 9px;
 }
 
 /* ---------- 全目标屏幕标记（标记框/边缘箭头） ---------- */

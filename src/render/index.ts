@@ -8,8 +8,10 @@ import { createEnvironment } from './app/createEnvironment';
 import { createRenderer, type RendererHooks } from './app/createRenderer';
 import { createScene } from './app/createScene';
 import { AtmosphereController, createClouds, MISSION_TOTAL_TIME } from './app/atmosphere';
+import { WeatherController } from './app/weather';
 import { RenderBridge } from './adapters/renderBridge';
 import { CombatEffects } from './effects/combatEffects';
+import { WingtipVortices, type AircraftFrame } from './effects/wingtipVortices';
 
 /** createRenderApp 参数：画布容器 + 上下文事件钩子 */
 export interface RenderAppOptions extends RendererHooks {
@@ -39,8 +41,12 @@ export interface RenderApp {
   render(world: SimulationWorld, alpha: number): void;
   /** 提交本帧模拟事件（渲染层消费为战斗特效：爆炸/火花等） */
   handleEvents(events: readonly GameEvent[]): void;
-  /** 将实体当前渲染帧位置投影为屏幕坐标（HUD 锁定框定位用） */
+  /** 将实体当前渲染帧位置投影为屏幕坐标（HUD 锁定框/得分弹出定位用） */
   projectEntity(entityId: number): ScreenProjection | null;
+  /** 激活天气音频上下文（用户手势后调用，雷声用） */
+  resumeWeatherAudio(): void;
+  /** 获取屏幕白闪当前强度（HUD 天气闪屏消费；0=无闪） */
+  getWeatherFlash(): number;
   /** 处理窗口尺寸变化（更新相机宽高比与渲染器尺寸） */
   resize(): void;
   /** 释放全部渲染资源并移除 canvas */
@@ -69,7 +75,7 @@ const GROUND_BLAST_ALTITUDE = 60;
  */
 export function createRenderApp(options: RenderAppOptions): RenderApp {
   const { renderer, canvas } = createRenderer(options.container, options);
-  const { scene, sunLight, hemiLight, skyDome } = createScene();
+  const { scene, sunLight, hemiLight, ambientLight, skyDome } = createScene();
   const camera = createCamera(window.innerWidth / window.innerHeight);
   const bridge = new RenderBridge();
   scene.add(bridge.group);
@@ -88,12 +94,28 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
     skyDome,
   );
 
-  // 战斗特效系统（爆炸/火花/烟迹）
+  // 雷暴天气控制器（暴雨/闪电/雷声/暗色氛围）
+  const weather = new WeatherController(
+    camera,
+    sunLight,
+    hemiLight,
+    ambientLight,
+    scene.fog as Fog,
+    skyDome,
+  );
+  scene.add(weather.group);
+
+  // 战斗特效系统（爆炸/火花/烟迹）+ 翼尖涡流
   const effects = new CombatEffects();
   scene.add(effects.group);
+  const vortices = new WingtipVortices();
+  scene.add(vortices.group);
 
   const chaseCamera = createChaseCamera(camera);
   let lastFrameMs = performance.now();
+
+  /** 涡流帧数据复用数组（避免每帧分配） */
+  const vortexFrames: AircraftFrame[] = [];
 
   return {
     /**
@@ -116,11 +138,36 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
         }
       }
 
-      // 大气：云层漂移 + 按任务进度昼夜渐变
+      // 大气：云层漂移 + 按任务进度昼夜渐变（天气在其后叠加暗色修正）
       atmosphere.update(frameDt, world.mission.getMissionElapsedTime() / MISSION_TOTAL_TIME);
+      weather.update(frameDt);
 
       // 特效粒子推进
       effects.update(frameDt);
+
+      // 翼尖涡流：收集飞机实体插值位姿与 G 值
+      vortexFrames.length = 0;
+      for (const entity of world.getEntities()) {
+        if (!entity.alive || entity.aircraft === undefined) {
+          continue;
+        }
+        if (
+          entity.variant === 'player' ||
+          entity.variant === 'enemy' ||
+          entity.variant === 'wingman'
+        ) {
+          const obj = bridge.getObject(entity.id);
+          if (obj !== undefined) {
+            vortexFrames.push({
+              id: entity.id,
+              position: obj.position,
+              quaternion: obj.quaternion,
+              gLoad: entity.aircraft.gLoad,
+            });
+          }
+        }
+      }
+      vortices.update(vortexFrames);
 
       // 追尾相机：读取玩家插值位姿与飞行状态（坠毁后玩家对象被移除，相机保持原位）
       const player = world.getPlayer();
@@ -145,34 +192,40 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
      *
      * 功能：将模拟事件映射为视觉特效——
      * missile-hit → 空中爆炸；missile-miss → 小型自毁爆闪；
-     * target-destroyed → 按高度分空爆/地面爆炸；
-     * player-crash → 大型空爆；gun-hit → 命中火花
+     * target-destroyed → 按高度与实体类型分空爆（小/大）/地面爆炸；
+     * player-crash → 大型爆炸；gun-hit → 命中火花
      * @param events 本帧模拟事件列表（只读）
      * @returns void
      * 异常：无
-     * 注意事项：与 HUD 共享同一事件列表（先渲染后调用或顺序无关）
+     * 注意事项：与 HUD 共享同一事件列表（先渲染后调用或顺序无关）；
+     * 轰炸机/地面大目标用 large 规模（1.8 倍）
      */
     handleEvents(events) {
       for (const event of events) {
         switch (event.type) {
           case 'missile-hit':
-            effects.spawnAirExplosion(event.position);
+            effects.spawnAirExplosion(event.position, 'small');
             break;
           case 'missile-miss':
-            effects.spawnAirExplosion(event.position);
+            effects.spawnAirExplosion(event.position, 'small');
             break;
-          case 'target-destroyed':
+          case 'target-destroyed': {
+            const kind =
+              event.variant === 'bomber' || event.variant === 'ground-target-entity'
+                ? 'large'
+                : 'small';
             if (event.position.y < GROUND_BLAST_ALTITUDE) {
               effects.spawnGroundExplosion(event.position);
             } else {
-              effects.spawnAirExplosion(event.position);
+              effects.spawnAirExplosion(event.position, kind);
             }
             break;
+          }
           case 'player-crash':
             if (event.position.y < GROUND_BLAST_ALTITUDE) {
               effects.spawnGroundExplosion(event.position);
             } else {
-              effects.spawnAirExplosion(event.position);
+              effects.spawnAirExplosion(event.position, 'large');
             }
             break;
           case 'gun-hit':
@@ -215,6 +268,26 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
     },
 
     /**
+     * 激活天气音频上下文（用户手势后调用）
+     *
+     * 功能：创建/resume WebAudio AudioContext（雷声合成用）
+     * @returns void
+     * 异常：WebAudio 不可用时静默降级
+     */
+    resumeWeatherAudio(): void {
+      weather.resumeAudio();
+    },
+
+    /**
+     * 获取屏幕白闪当前强度
+     *
+     * @returns 0..1 的白闪强度（0=无闪，HUD 天气闪屏消费）
+     */
+    getWeatherFlash(): number {
+      return weather.flashPulse;
+    },
+
+    /**
      * 处理窗口尺寸变化
      */
     resize() {
@@ -229,6 +302,7 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
     dispose() {
       bridge.dispose();
       effects.dispose();
+      vortices.dispose();
       renderer.dispose();
       canvas.remove();
     },

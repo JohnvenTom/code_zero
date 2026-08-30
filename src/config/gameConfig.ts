@@ -208,19 +208,17 @@ export interface InputConfig {
     readonly throttleUp: string;
     /** 油门减小 */
     readonly throttleDown: string;
-    /** 机炮开火（任一按键） */
+    /** 发射当前选中武器（空格：机炮持续/导弹与特殊单发） */
     readonly fire: readonly string[];
-    /** 导弹发射（边沿触发） */
-    readonly missile: string;
+    /** 循环切换武器类型（R：gun→missile→special，边沿触发） */
+    readonly cycleWeapon: string;
+    /** 切换锁定目标（X：锥内候选循环，边沿触发） */
+    readonly switchTarget: string;
     /** 干扰弹释放（边沿触发） */
     readonly flare: string;
-    /** 特殊武器发射（边沿触发） */
-    readonly special: string;
-    /** 特殊武器切换（边沿触发） */
-    readonly cycleSpecial: string;
     /** 僚机指令循环（边沿触发：进攻→掩护→集合） */
     readonly wingmanCommand: string;
-    /** 坠毁后重置到跑道 */
+    /** 坠毁后重置到跑道（Backspace） */
     readonly reset: string;
   };
 }
@@ -369,6 +367,44 @@ export interface WeaponReloadConfig {
   readonly missile: number;
   /** 干扰弹装填时长（秒） */
   readonly flare: number;
+}
+
+/** 雷暴天气配置（迭代11：Task 38） */
+export interface WeatherConfig {
+  /** 是否开启雷暴天气 */
+  readonly enabled: boolean;
+  /** 雨粒子数量（相机跟随盒内线段） */
+  readonly rainCount: number;
+  /** 雨跟随盒边长（米，相机为中心） */
+  readonly rainBoxSize: number;
+  /** 雨下落速度（m/s） */
+  readonly rainFallSpeed: number;
+  /** 雨线段长度（米） */
+  readonly rainStreakLength: number;
+  /** 闪电最小间隔（秒） */
+  readonly lightningMinInterval: number;
+  /** 闪电最大间隔（秒） */
+  readonly lightningMaxInterval: number;
+  /** 闪电时日光脉冲强度 */
+  readonly lightningIntensity: number;
+  /** 闪电时天空增亮强度 */
+  readonly lightningSkyBoost: number;
+  /** 闪电视觉衰减时长（秒） */
+  readonly lightningDecay: number;
+  /** 雷声最远延迟（秒，随闪电方位随机 0.3~该值） */
+  readonly thunderMaxDelay: number;
+  /** 雷声音量（0..1） */
+  readonly thunderVolume: number;
+  /** 雨线整体不透明度（0..1） */
+  readonly rainOpacity: number;
+  /** 雷雨雾 near 系数（构造时基值快照 × 该系数，浓雾更近） */
+  readonly fogNearScale: number;
+  /** 雷雨雾 far 系数（构造时基值快照 × 该系数，浓雾视野更紧） */
+  readonly fogFarScale: number;
+  /** 雷雨日光压暗系数 */
+  readonly sunDim: number;
+  /** 雷雨半球光压暗系数 */
+  readonly hemiDim: number;
 }
 
 /** 僚机配置（Task 16） */
@@ -532,7 +568,7 @@ export const gameConfig = {
     liftoffPitch: 0.09,
     crashMargin: 0.5,
   } satisfies FlightConfig,
-  /** 键盘输入（迭代9 重映射：方向键 ←→ 改为滚转，小键盘滚转取消；A/D 踩舵偏航） */
+  /** 键盘输入（迭代11 重构：空格统一发射、R 换武器、X 切目标、Backspace 重置；←→ 滚转、A/D 踩舵） */
   input: {
     pitchSensitivity: 1,
     rollSensitivity: 1,
@@ -546,13 +582,12 @@ export const gameConfig = {
       yawRight: ['KeyD'],
       throttleUp: 'KeyW',
       throttleDown: 'KeyS',
-      fire: ['Space', 'KeyJ'],
-      missile: 'KeyF',
+      fire: ['Space'],
+      cycleWeapon: 'KeyR',
+      switchTarget: 'KeyX',
       flare: 'KeyE',
-      special: 'KeyQ',
-      cycleSpecial: 'KeyX',
       wingmanCommand: 'KeyC',
-      reset: 'KeyR',
+      reset: 'Backspace',
     },
   } satisfies InputConfig,
   /** 机炮 */
@@ -597,10 +632,10 @@ export const gameConfig = {
     damage: 90,
     life: 9,
   } satisfies MissileConfig,
-  /** 干扰弹系统 */
+  /** 干扰弹系统（迭代11：冷却大幅降低允许连按规避） */
   flare: {
     count: 6,
-    cooldown: 1.1,
+    cooldown: 0.15,
     life: 3.2,
     ejectBackSpeed: 50,
     ejectUpSpeed: 15,
@@ -649,6 +684,28 @@ export const gameConfig = {
     missile: 24,
     flare: 12,
   } satisfies WeaponReloadConfig,
+  /** 雷暴天气（迭代11：暴雨/闪电/雷声/暗色雷雨氛围） */
+  weather: {
+    enabled: true,
+    rainCount: 3200,
+    rainBoxSize: 90,
+    rainFallSpeed: 55,
+    rainStreakLength: 3.2,
+    rainOpacity: 0.42,
+    lightningMinInterval: 4,
+    lightningMaxInterval: 12,
+    lightningIntensity: 3.2,
+    lightningSkyBoost: 1.6,
+    lightningDecay: 0.3,
+    thunderMaxDelay: 2.5,
+    thunderVolume: 0.45,
+    /** 雷雨雾系数（浓雾：near 更近、far 收得更紧） */
+    fogNearScale: 0.32,
+    fogFarScale: 0.42,
+    /** 雷雨日光/半球光压暗系数 */
+    sunDim: 0.3,
+    hemiDim: 0.5,
+  } satisfies WeatherConfig,
   /** 僚机系统 */
   wingman: {
     count: 2,

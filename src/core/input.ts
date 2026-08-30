@@ -8,11 +8,13 @@ const PUSH_SENSITIVITY = 0.8;
  * 键盘输入管理器
  *
  * 功能：监听窗口键盘事件，将按键状态维护为按下集合与一次性动作队列
- * （导弹/干扰弹/重置为边沿触发），按 simulation 层定义的 ControlInput
- * 结构输出纯数据快照，供固定步模拟采样；俯仰输入不对称调优
- * （拉杆全量、推杆 0.8 倍，符合街机空战"抬头快低头柔"手感）；
- * 键位映射（迭代8 重映射）：W/S 油门、↑↓ 俯仰、A/D 与 ←→ 踩舵
- * （偏航）、小键盘 4/6 滚转；滚转/偏航为数组键位（任一按下即生效）；
+ * （换武器/切目标/干扰弹/重置为边沿触发），按 simulation 层定义的
+ * ControlInput 结构输出纯数据快照，供固定步模拟采样；
+ * 俯仰输入不对称调优（拉杆全量、推杆 0.8 倍）。
+ * 键位映射（迭代11 重构）：W/S 油门、↑↓ 俯仰、←→ 滚转、
+ * A/D 踩舵（偏航）、空格=发射当前选中武器、R=循环切换武器、
+ * X=切换锁定目标、C=僚机指令、E=干扰弹、Backspace=坠毁重置；
+ * Backspace 的浏览器默认行为（后退导航）被强制拦截；
  * 窗口失焦时自动清空避免按键卡死。
  * 边界约定：本类属于 core 层的 DOM 桥接件，只产生纯数据，
  * 不包含任何游戏规则；键位与灵敏度均来自配置表。
@@ -20,17 +22,15 @@ const PUSH_SENSITIVITY = 0.8;
 export class InputManager {
   /** 当前按下的 KeyboardEvent.code 集合 */
   private readonly pressed = new Set<string>();
-  /** 待消费的一次性动作：重置键 */
+  /** 待消费的一次性动作：重置键（Backspace） */
   private pendingReset = false;
-  /** 待消费的一次性动作：导弹发射键 */
-  private pendingMissile = false;
-  /** 待消费的一次性动作：干扰弹释放键 */
+  /** 待消费的一次性动作：循环切换武器键（R） */
+  private pendingCycleWeapon = false;
+  /** 待消费的一次性动作：切换锁定目标键（X） */
+  private pendingSwitchTarget = false;
+  /** 待消费的一次性动作：干扰弹释放键（E） */
   private pendingFlare = false;
-  /** 待消费的一次性动作：特殊武器发射键 */
-  private pendingSpecial = false;
-  /** 待消费的一次性动作：特殊武器切换键 */
-  private pendingCycleSpecial = false;
-  /** 待消费的一次性动作：僚机指令循环键 */
+  /** 待消费的一次性动作：僚机指令循环键（C） */
   private pendingWingmanCommand = false;
   /** 全部被游戏占用的键位集合（用于 preventDefault 拦截浏览器默认行为） */
   private readonly actionCodes: Set<string>;
@@ -40,7 +40,7 @@ export class InputManager {
   /**
    * 构造输入管理器
    *
-   * 功能：构建键位占用集合（滚转/偏航为数组键位，展开注册）
+   * 功能：构建键位占用集合（滚转/偏航/发射为数组键位，展开注册）
    * 并挂载 keydown/keyup/blur 事件监听
    * 参数：无
    * 异常：无
@@ -58,10 +58,9 @@ export class InputManager {
       this.keys.throttleUp,
       this.keys.throttleDown,
       this.keys.reset,
-      this.keys.missile,
+      this.keys.cycleWeapon,
+      this.keys.switchTarget,
       this.keys.flare,
-      this.keys.special,
-      this.keys.cycleSpecial,
       this.keys.wingmanCommand,
       ...this.keys.fire,
     ]);
@@ -74,7 +73,7 @@ export class InputManager {
    * 采样玩家输入快照
    *
    * 功能：将当前按键状态转换为 ControlInput 纯数据；
-   * missile/flare/special/cycleSpecial/wingmanCommand/reset 为边沿触发
+   * cycleWeapon/switchTarget/flare/wingmanCommand/reset 为边沿触发
    * （consumePending 语义，仅首个采样固定步读到 true）
    * @returns 玩家控制输入快照
    * 异常：无
@@ -83,11 +82,11 @@ export class InputManager {
   sample(): ControlInput {
     const keys = this.keys;
     const rawPitch = (this.isDown(keys.pitchPull) ? 1 : 0) + (this.isDown(keys.pitchPush) ? -1 : 0);
-    // 滚转：小键盘 4/6（数组键位，任一按下即生效）
+    // 滚转：←→（数组键位，任一按下即生效）
     const roll =
       (keys.rollRight.some((code) => this.isDown(code)) ? 1 : 0) +
       (keys.rollLeft.some((code) => this.isDown(code)) ? -1 : 0);
-    // 偏航（踩舵）：A/D 与方向键 ←→（数组键位）
+    // 偏航（踩舵）：A/D（数组键位）
     const yaw =
       (keys.yawRight.some((code) => this.isDown(code)) ? 1 : 0) +
       (keys.yawLeft.some((code) => this.isDown(code)) ? -1 : 0);
@@ -95,16 +94,14 @@ export class InputManager {
     // 街机空战手感（抬头跟手、俯冲可控）
     const pitch = rawPitch > 0 ? rawPitch : rawPitch * PUSH_SENSITIVITY;
     const fire = keys.fire.some((code) => this.pressed.has(code));
-    const missile = this.pendingMissile;
+    const cycleWeapon = this.pendingCycleWeapon;
+    const switchTarget = this.pendingSwitchTarget;
     const flare = this.pendingFlare;
-    const special = this.pendingSpecial;
-    const cycleSpecial = this.pendingCycleSpecial;
     const wingmanCommand = this.pendingWingmanCommand;
     const reset = this.pendingReset;
-    this.pendingMissile = false;
+    this.pendingCycleWeapon = false;
+    this.pendingSwitchTarget = false;
     this.pendingFlare = false;
-    this.pendingSpecial = false;
-    this.pendingCycleSpecial = false;
     this.pendingWingmanCommand = false;
     this.pendingReset = false;
     return {
@@ -114,10 +111,9 @@ export class InputManager {
       throttleUp: this.isDown(keys.throttleUp),
       throttleDown: this.isDown(keys.throttleDown),
       fire,
-      missile,
+      cycleWeapon,
+      switchTarget,
       flare,
-      special,
-      cycleSpecial,
       wingmanCommand,
       reset,
     };
@@ -136,10 +132,10 @@ export class InputManager {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
     this.pressed.clear();
-    this.pendingMissile = false;
+    this.pendingCycleWeapon = false;
+    this.pendingSwitchTarget = false;
     this.pendingFlare = false;
-    this.pendingSpecial = false;
-    this.pendingCycleSpecial = false;
+    this.pendingWingmanCommand = false;
     this.pendingReset = false;
   }
 
@@ -156,8 +152,9 @@ export class InputManager {
   /**
    * keydown 事件处理（私有）
    *
-   * 功能：拦截游戏键位的浏览器默认行为，登记按下状态；
-   * 导弹/干扰弹/特殊武器/重置键为一次性动作仅登记一次（忽略长按重复）
+   * 功能：拦截游戏键位的浏览器默认行为（Backspace 的后退导航等），
+   * 登记按下状态；换武器/切目标/干扰弹/僚机/重置键为一次性动作
+   * 仅登记一次（忽略长按重复）
    * @param event 键盘事件
    * @returns void
    * 异常：无
@@ -174,14 +171,12 @@ export class InputManager {
     this.pressed.add(event.code);
     if (event.code === this.keys.reset) {
       this.pendingReset = true;
-    } else if (event.code === this.keys.missile) {
-      this.pendingMissile = true;
+    } else if (event.code === this.keys.cycleWeapon) {
+      this.pendingCycleWeapon = true;
+    } else if (event.code === this.keys.switchTarget) {
+      this.pendingSwitchTarget = true;
     } else if (event.code === this.keys.flare) {
       this.pendingFlare = true;
-    } else if (event.code === this.keys.special) {
-      this.pendingSpecial = true;
-    } else if (event.code === this.keys.cycleSpecial) {
-      this.pendingCycleSpecial = true;
     } else if (event.code === this.keys.wingmanCommand) {
       this.pendingWingmanCommand = true;
     }
@@ -205,10 +200,9 @@ export class InputManager {
    */
   private onBlur = (): void => {
     this.pressed.clear();
-    this.pendingMissile = false;
+    this.pendingCycleWeapon = false;
+    this.pendingSwitchTarget = false;
     this.pendingFlare = false;
-    this.pendingSpecial = false;
-    this.pendingCycleSpecial = false;
     this.pendingWingmanCommand = false;
     this.pendingReset = false;
   };

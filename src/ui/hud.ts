@@ -45,6 +45,20 @@ export interface HudTargetMarker {
 }
 
 /**
+ * COD 风格得分弹出（由 main.ts 结合渲染层投影组装）
+ */
+export interface HudScorePopup {
+  /** 屏幕横坐标（像素，目标位置） */
+  readonly screenX: number;
+  /** 屏幕纵坐标（像素） */
+  readonly screenY: number;
+  /** 得分文本（如 "+100"） */
+  readonly text: string;
+  /** 是否大号金色（击坠；false=小号白色命中） */
+  readonly kill: boolean;
+}
+
+/**
  * HUD 统计数据（由 main.ts 每帧喂入）
  */
 export interface HudStats {
@@ -62,6 +76,10 @@ export interface HudStats {
   readonly lock: HudLockInfo | null;
   /** 全目标屏幕标记列表（敌机/轰炸机/地面/友军/僚机/来袭导弹） */
   readonly markers: readonly HudTargetMarker[];
+  /** 本帧得分弹出列表（命中/击坠，投影定位） */
+  readonly scorePopups: readonly HudScorePopup[];
+  /** 天气屏幕白闪强度（0..1，闪电时） */
+  readonly weatherFlash: number;
   /** 本帧消费的模拟事件（命中/击毁/坠毁/导弹/干扰弹/锁定） */
   readonly events: readonly GameEvent[];
 }
@@ -95,6 +113,9 @@ const RADAR_BLIP_POOL = 32;
 
 /** 屏幕标记 DOM 池容量（敌机+轰炸机+友军+僚机+地面+来袭导弹上限） */
 const MARKER_POOL = 36;
+
+/** 得分弹出 DOM 池容量 */
+const SCORE_POOL = 8;
 
 /** 雷达显示范围（米，来自配置表） */
 const RADAR_RANGE_M = gameConfig.radar.range;
@@ -144,11 +165,9 @@ export function createHud(root: HTMLElement): Hud {
   const entityCountValue = createStat(strip, '实体');
   root.appendChild(strip);
 
-  // ---- 中央动态准星（速度张合支架 + 旋转刻度环 + 锁定联动） ----
+  // ---- 中央动态准星（速度张合四支架 + 中心点，迭代11 删除旋转刻度环） ----
   const crosshair = document.createElement('div');
   crosshair.className = 'hud-crosshair';
-  const crosshairRing = document.createElement('div');
-  crosshairRing.className = 'hud-crosshair-ring';
   const crosshairDot = document.createElement('div');
   crosshairDot.className = 'hud-crosshair-dot';
   for (const side of ['t', 'b', 'l', 'r']) {
@@ -156,7 +175,6 @@ export function createHud(root: HTMLElement): Hud {
     arm.className = `hud-crosshair-arm arm-${side}`;
     crosshair.appendChild(arm);
   }
-  crosshair.appendChild(crosshairRing);
   crosshair.appendChild(crosshairDot);
   root.appendChild(crosshair);
 
@@ -289,6 +307,21 @@ export function createHud(root: HTMLElement): Hud {
   lockBox.appendChild(lockLabel);
   root.appendChild(lockBox);
 
+  // ---- COD 风格得分弹出池（DOM 复用，CSS 动画向上飘淡出） ----
+  const scoreEls: HTMLElement[] = [];
+  for (let i = 0; i < SCORE_POOL; i++) {
+    const score = document.createElement('div');
+    score.className = 'hud-score';
+    score.style.display = 'none';
+    root.appendChild(score);
+    scoreEls.push(score);
+  }
+
+  // ---- 天气屏幕白闪（闪电触发时快速淡出，默认透明） ----
+  const weatherFlashEl = document.createElement('div');
+  weatherFlashEl.className = 'hud-weather-flash';
+  root.appendChild(weatherFlashEl);
+
   // ---- 告警条：失速 / 导弹来袭 / 被锁定 ----
   const stallWarning = document.createElement('div');
   stallWarning.className = 'hud-warn hud-warn-stall';
@@ -313,16 +346,16 @@ export function createHud(root: HTMLElement): Hud {
   crashTitle.textContent = '已坠毁';
   const crashHint = document.createElement('div');
   crashHint.className = 'hud-crash-hint';
-  crashHint.textContent = '按 R 键重置到跑道';
+  crashHint.textContent = '按 Backspace 键重置到跑道';
   crashPanel.appendChild(crashTitle);
   crashPanel.appendChild(crashHint);
   root.appendChild(crashPanel);
 
-  // ---- 底部操作提示（迭代8 键位重映射后文案） ----
+  // ---- 底部操作提示（迭代11 键位重构后文案） ----
   const chip = document.createElement('div');
   chip.className = 'hud-hint-chip';
   chip.textContent =
-    'W/S 油门 · ↑↓ 俯仰 · ←→ 滚转 · A/D 踩舵 · 空格 机炮 · F 导弹 · Q 特殊 · C 僚机 · E 干扰弹 · R 重置';
+    'W/S 油门 · ↑↓ 俯仰 · ←→ 滚转 · A/D 踩舵 · 空格 开火 · R 换武器 · X 切目标 · C 僚机 · E 干扰弹 · Backspace 重置';
   root.appendChild(chip);
 
   // ---- WebGL 上下文丢失遮罩（默认隐藏） ----
@@ -407,10 +440,18 @@ export function createHud(root: HTMLElement): Hud {
         );
         crashPanel.classList.toggle('is-active', !flight.alive);
 
-        // 雷达光点：池化更新位置与显隐（north-up 固定方位）
-        updateRadarBlips(radarBlips, flight.radarBlips);
-        // 玩家航向箭头：绕雷达中心随机头方向旋转（0=正北顺时针）
-        radarHeading.style.transform = `rotate(${flight.playerHeadingDeg.toFixed(1)}deg)`;
+        // 雷达光点：池化更新位置与显隐（heading-up 玩家朝向模式——
+        // 光点按 -玩家航向角旋转到机头朝上坐标系）
+        updateRadarBlipsHeadingUp(radarBlips, flight.radarBlips, flight.playerHeadingDeg);
+        // 玩家箭头固定朝上（heading-up）；N 标记转出雷达外圈随航向指示北向
+        radarHeading.style.transform = 'rotate(0deg)';
+        radarNorth.style.transform = `rotate(${(-flight.playerHeadingDeg).toFixed(1)}deg)`;
+
+        // 武器面板：当前选中武器高亮（is-selected 金色箭头）
+        const sel = flight.selectedWeapon;
+        gunValue.parentElement?.classList.toggle('is-selected', sel === 'gun');
+        missileValue.parentElement?.classList.toggle('is-selected', sel === 'missile');
+        specialValue.parentElement?.classList.toggle('is-selected', sel === 'special');
       } else {
         stallWarning.classList.remove('is-active');
         missileWarning.classList.remove('is-active');
@@ -427,6 +468,12 @@ export function createHud(root: HTMLElement): Hud {
 
       // 锁定框：屏幕空间定位与状态样式
       updateLockBox(lockBox, lockLabel, stats.lock);
+
+      // COD 得分弹出：池化写入（位置 + 得分文本 + 大小样式）
+      updateScorePopups(scoreEls, stats.scorePopups);
+
+      // 天气屏幕白闪：强度写入透明度（闪电时）
+      weatherFlashEl.style.opacity = `${stats.weatherFlash.toFixed(3)}`;
 
       // 模拟事件反馈：命中标记与击毁提示
       let hasHit = false;
@@ -459,6 +506,15 @@ export function createHud(root: HTMLElement): Hud {
               : event.command === 'cover'
                 ? '僚机指令：掩护'
                 : '僚机指令：集合';
+        } else if (event.type === 'weapon-switched') {
+          destroyedText =
+            event.weapon === 'gun'
+              ? '切换：机炮'
+              : event.weapon === 'missile'
+                ? '切换：导弹'
+                : '切换：特殊武器';
+        } else if (event.type === 'lock-target-switched') {
+          destroyedText = '目标切换';
         }
       }
       if (hasHit) {
@@ -572,23 +628,31 @@ function setWeaponValue(
 }
 
 /**
- * 更新雷达光点（池化 DOM 复用）
+ * 更新雷达光点（heading-up 玩家朝向模式，池化 DOM 复用）
  *
- * 功能：将模拟层 north-up 雷达光点（米，东=x / 北=y）映射到雷达
- * 像素坐标并写入光点池——北（y 正）映射为屏幕上方（负 y 偏移）；
+ * 功能：将模拟层 north-up 雷达光点（米，东=x / 北=y）旋转
+ * -玩家航向角 变换到机头朝上坐标系后映射到雷达像素坐标——
+ * 玩家转向时全部光点随坐标系反向旋转（玩家箭头固定朝上）；
  * 不足时隐藏多余光点；敌机红、轰炸机紫红、友军蓝、僚机青、
  * 地面/靶标橙
  * @param blipEls 光点 DOM 池
  * @param blips 本帧雷达光点数据（米，north-up 固定方位坐标）
+ * @param playerHeadingDeg 玩家航向角（度，0=正北顺时针）
  * @returns void
  * 异常：无
- * 注意事项：光点按固定世界方位放置，不随玩家航向/滚转变化；
- * 超出池容量时截断（数量远小于池容量）
+ * 注意事项：旋转公式——屏幕 x = 东·cos(-h) - 北·sin(-h)，
+ * 屏幕 y 上 = 东·sin(-h) + 北·cos(-h)（h 为航向角）；
+ * 滚转不影响（雷达为平面方位图）；超出池容量时截断
  */
-function updateRadarBlips(
+function updateRadarBlipsHeadingUp(
   blipEls: readonly HTMLElement[],
   blips: readonly { x: number; y: number; kind: string }[],
+  playerHeadingDeg: number,
 ): void {
+  // 旋转角（弧度，负号=机头朝上坐标系相对北-up 的旋转）
+  const rad = (-playerHeadingDeg * Math.PI) / 180;
+  const cosH = Math.cos(rad);
+  const sinH = Math.sin(rad);
   const count = Math.min(blips.length, blipEls.length);
   for (let i = 0; i < blipEls.length; i++) {
     const el = blipEls[i]!;
@@ -597,9 +661,11 @@ function updateRadarBlips(
       continue;
     }
     const blip = blips[i]!;
-    // 东(+x)=屏幕右，北(+y)=屏幕上（负 y 偏移）
-    const px = (blip.x / RADAR_RANGE_M) * RADAR_RADIUS_PX;
-    const py = -(blip.y / RADAR_RANGE_M) * RADAR_RADIUS_PX;
+    // 世界 east/north → 机头朝上坐标（x 右 / y 上）
+    const rx = blip.x * cosH - blip.y * sinH;
+    const ry = blip.x * sinH + blip.y * cosH;
+    const px = (rx / RADAR_RANGE_M) * RADAR_RADIUS_PX;
+    const py = -(ry / RADAR_RANGE_M) * RADAR_RADIUS_PX;
     el.style.display = 'block';
     el.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px)`;
     el.classList.toggle('is-enemy', blip.kind === 'enemy');
@@ -607,6 +673,40 @@ function updateRadarBlips(
     el.classList.toggle('is-ally', blip.kind === 'ally');
     el.classList.toggle('is-wingman', blip.kind === 'wingman');
     el.classList.toggle('is-ground', blip.kind === 'ground' || blip.kind === 'target');
+  }
+}
+
+/**
+ * 更新 COD 风格得分弹出（池化 DOM 复用）
+ *
+ * 功能：将得分弹出列表写入 DOM 池——设置位置与文本，挂 kill
+ * 大号金色 / hit 小号白色样式，重放向上飘 40px + 淡出 0.8s 的
+ * CSS 动画；同帧多命中按池序天然错开位置
+ * @param scoreEls 得分弹出 DOM 池
+ * @param popups 本帧得分弹出列表
+ * @returns void
+ * 异常：无
+ * 注意事项：DOM 池 8 个循环复用；重放动画用 retriggerAnimation
+ */
+function updateScorePopups(
+  scoreEls: readonly HTMLElement[],
+  popups: readonly { screenX: number; screenY: number; text: string; kill: boolean }[],
+): void {
+  const count = Math.min(popups.length, scoreEls.length);
+  for (let i = 0; i < scoreEls.length; i++) {
+    const el = scoreEls[i]!;
+    if (i >= count) {
+      el.style.display = 'none';
+      continue;
+    }
+    const popup = popups[i]!;
+    el.style.display = 'block';
+    el.style.left = `${popup.screenX.toFixed(0)}px`;
+    el.style.top = `${popup.screenY.toFixed(0)}px`;
+    el.textContent = popup.text;
+    el.classList.toggle('is-kill', popup.kill);
+    el.classList.toggle('is-hit', !popup.kill);
+    retriggerAnimation(el, 'is-active');
   }
 }
 

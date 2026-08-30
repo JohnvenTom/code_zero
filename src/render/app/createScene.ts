@@ -21,6 +21,8 @@ export interface SceneBundle {
   sunLight: DirectionalLight;
   /** 半球环境光引用，供昼夜系统调节 */
   hemiLight: HemisphereLight;
+  /** 环境光引用，供天气闪电脉冲 */
+  ambientLight: AmbientLight;
   /** 天空穹顶网格引用，供昼夜系统整体调色 */
   skyDome: Mesh;
 }
@@ -108,13 +110,13 @@ export function createScene(): SceneBundle {
   );
   scene.add(hemiLight);
 
-  const ambient = new AmbientLight(0xffffff, 0.25);
-  scene.add(ambient);
+  const ambientLight = new AmbientLight(0xffffff, 0.25);
+  scene.add(ambientLight);
 
   const sunLight = new DirectionalLight(0xfff4e0, lightCfg.sunIntensity);
   const [x, y, z] = lightCfg.sunDirection;
   sunLight.position.set(x, y, z);
   scene.add(sunLight);
 
-  return { scene, sunLight, hemiLight, skyDome };
+  return { scene, sunLight, hemiLight, ambientLight, skyDome };
 }

@@ -62,8 +62,18 @@ export function createChaseCamera(camera: PerspectiveCamera): ChaseCameraControl
     update(targetPosition, targetQuaternion, speed, gLoad, dt) {
       const dtc = Math.min(Math.max(dt, 0), 0.1);
 
+      // 高速相机修正：速度感 FOV 增幅收敛（fovBoost 6°上限）+
+      // 相机距离随速度略拉近（高速时 0.85 倍距离补偿，
+      // 保持飞机在画面中占比不缩小太多）
+      const speedFactor = Math.min(
+        Math.max((speed - flightCfg.stallSpeed) / (flightCfg.maxSpeed - flightCfg.stallSpeed), 0),
+        1,
+      );
+      const zoomCompensation = 1 - speedFactor * 0.15; // 1.0 → 0.85
+      const effectiveDistance = chaseCfg.distance * zoomCompensation;
+
       // 期望位置：机体后上方（机体 +Z 为机尾方向）
-      _offset.set(0, chaseCfg.height, chaseCfg.distance).applyQuaternion(targetQuaternion);
+      _offset.set(0, chaseCfg.height, effectiveDistance).applyQuaternion(targetQuaternion);
       _desired.copy(targetPosition).add(_offset);
 
       if (firstUpdate) {
@@ -99,12 +109,9 @@ export function createChaseCamera(camera: PerspectiveCamera): ChaseCameraControl
       camera.up.copy(_cameraUp);
       camera.lookAt(_lookTarget);
 
-      // 速度感 FOV：速度区间内平滑放大视场
-      const speedFactor = Math.min(
-        Math.max((speed - flightCfg.stallSpeed) / (flightCfg.maxSpeed - flightCfg.stallSpeed), 0),
-        1,
-      );
-      const targetFov = gameConfig.camera.fov + speedFactor * chaseCfg.fovBoost;
+      // 速度感 FOV：速度区间内平滑放大视场（迭代11：增幅收敛 6° 上限，
+      // 原 16° 上限过大会让飞机在画面中占比缩小太多）
+      const targetFov = gameConfig.camera.fov + speedFactor * 6;
       currentFov += (targetFov - currentFov) * Math.min(1, chaseCfg.fovLag * dtc);
       camera.fov = currentFov;
       camera.updateProjectionMatrix();

@@ -57,10 +57,9 @@ const CRUISE_INPUT: ControlInput = {
   throttleUp: false,
   throttleDown: false,
   fire: false,
-  missile: false,
+  cycleWeapon: false,
+  switchTarget: false,
   flare: false,
-  special: false,
-  cycleSpecial: false,
   wingmanCommand: false,
   reset: false,
 };
@@ -149,6 +148,8 @@ export interface PlayerFlightSnapshot {
   readonly specialReloadRemain: number | null;
   /** 最佳机动速度 corner speed（km/h，HUD CNR 指示显示） */
   readonly bestManeuverSpeedKmh: number;
+  /** 当前选中武器类型（R 循环切换，HUD 武器面板高亮） */
+  readonly selectedWeapon: 'gun' | 'missile' | 'special';
   /** 机型代号（HUD/结算展示） */
   readonly fighterName: string;
   /** 僚机指令（HUD 指令显示） */
@@ -218,6 +219,9 @@ export class SimulationWorld {
 
   /** 玩家所选战机配置（spawnPlayer 时确定） */
   private playerFighter: FighterConfig | null = null;
+
+  /** 当前选中武器类型（R 键循环：gun→missile→special→gun） */
+  private selectedWeapon: 'gun' | 'missile' | 'special' = 'gun';
 
   /** 敌机机型名轮询计数器（生成敌机时依次取 typeNames） */
   private enemyTypeIndex = 0;
@@ -598,44 +602,61 @@ export class SimulationWorld {
       this.lockTracker.update(player, this.entities, dt, pushEvent);
     }
 
-    // 7) 玩家武器：机炮/导弹/干扰弹/特殊武器
+    // 7) 玩家武器：R 循环切换选中武器 + 空格发射当前选中武器
     if (player !== null && player.alive) {
       tickMissilePod(player, dt);
       tickFlarePod(player, dt);
       if (player.specialPod !== undefined) {
         tickSpecialWeapon(player.specialPod, dt);
       }
-      updateGun(player, input.fire, dt, (kind, position, quaternion) =>
-        this.spawn(kind, position, quaternion),
-      );
-      // 导弹发射：锁定完成 + 按键边沿
-      if (input.missile && this.lockTracker.isLocked) {
-        const targetId = this.lockTracker.currentTargetId;
-        const target = targetId !== null ? this.findById(targetId) : undefined;
-        if (target !== undefined) {
-          launchMissile(
-            player,
-            target,
-            (kind, position, quaternion) => this.spawn(kind, position, quaternion),
-            pushEvent,
-          );
+      // R 键：循环切换武器类型 gun→missile→special→gun
+      if (input.cycleWeapon) {
+        this.selectedWeapon =
+          this.selectedWeapon === 'gun'
+            ? 'missile'
+            : this.selectedWeapon === 'missile'
+              ? 'special'
+              : 'gun';
+        pushEvent({ type: 'weapon-switched', weapon: this.selectedWeapon });
+      }
+      // X 键：手动循环切换锁定目标（锥内候选）
+      if (input.switchTarget) {
+        if (this.lockTracker.cycleTarget(player, this.entities)) {
+          pushEvent({ type: 'lock-target-switched' });
         }
+      }
+      // 空格：按当前选中武器分派发射
+      if (this.selectedWeapon === 'gun') {
+        updateGun(player, input.fire, dt, (kind, position, quaternion) =>
+          this.spawn(kind, position, quaternion),
+        );
+      } else if (this.selectedWeapon === 'missile') {
+        if (input.fire && this.lockTracker.isLocked) {
+          const targetId = this.lockTracker.currentTargetId;
+          const target = targetId !== null ? this.findById(targetId) : undefined;
+          if (target !== undefined) {
+            launchMissile(
+              player,
+              target,
+              (kind, position, quaternion) => this.spawn(kind, position, quaternion),
+              pushEvent,
+            );
+          }
+        }
+      } else if (input.fire && player.specialPod !== undefined) {
+        launchSpecialWeapon(
+          player,
+          this.lockTracker.currentTargetId,
+          this.entities,
+          (kind, position, quaternion) => this.spawn(kind, position, quaternion),
+          pushEvent,
+        );
       }
       // 干扰弹释放：按键边沿
       if (input.flare) {
         releaseFlares(
           player,
           (kind, position) => this.spawn(kind, position),
-          pushEvent,
-        );
-      }
-      // 特殊武器发射：按键边沿
-      if (input.special && player.specialPod !== undefined) {
-        launchSpecialWeapon(
-          player,
-          this.lockTracker.currentTargetId,
-          this.entities,
-          (kind, position, quaternion) => this.spawn(kind, position, quaternion),
           pushEvent,
         );
       }
@@ -928,6 +949,7 @@ export class SimulationWorld {
           ? player.specialPod.reloadRemain
           : null,
       bestManeuverSpeedKmh: (player.aircraft?.params.bestManeuverSpeed ?? gameConfig.flight.bestManeuverSpeed) * 3.6,
+      selectedWeapon: this.selectedWeapon,
       fighterName: this.playerFighter?.name ?? '',
       wingmanCommand: this.wingmanCommand,
       wingmenAlive,

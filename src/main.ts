@@ -4,8 +4,8 @@ import { PerfProbe } from './diagnostics/perf';
 import { createRenderApp, type RenderApp } from './render';
 import { setPlayerFighter } from './render/objects/meshes';
 import { SimulationWorld } from './simulation';
-import type { MarkerInfo } from './simulation';
-import { createHud, type Hud, type HudLockInfo, type HudTargetMarker } from './ui';
+import type { GameEvent, MarkerInfo } from './simulation';
+import { createHud, type Hud, type HudLockInfo, type HudScorePopup, type HudTargetMarker } from './ui';
 import { createMissionUi, type MissionUi } from './ui';
 import { createHangarUi, type HangarUi } from './ui';
 
@@ -110,6 +110,51 @@ function assembleMarkers(
 }
 
 /**
+ * 组装 COD 风格得分弹出列表（事件 → 得分 + 屏幕投影）
+ *
+ * 功能：遍历本帧模拟事件——gun-hit/missile-hit → +100 命中（小号白色）；
+ * target-destroyed → 按实体变体得分（敌机 +150 / 轰炸机 +250 /
+ * 地面 +100，大号金色）；得分弹出在事件发生位置弹出（事件位置
+ * 经世界层最近的实体投影——gun-hit 位置无法直接投影，此处用
+ * 准星中心附近偏移模拟弹出位置）
+ * @param events 本帧模拟事件列表
+ * @param renderApp 渲染应用（projectEntity 投影）
+ * @returns 得分弹出列表（供 hud.update 消费）
+ * 异常：无
+ * 注意事项：命中事件的位置是弹着点（无渲染对象不可投影），
+ * 用屏幕中心 + 随机小偏移近似；击坠事件同样处理
+ */
+function assembleScorePopups(events: readonly GameEvent[]): HudScorePopup[] {
+  const result: HudScorePopup[] = [];
+  for (const event of events) {
+    if (event.type === 'gun-hit' || event.type === 'missile-hit') {
+      result.push({
+        screenX: window.innerWidth / 2 + (Math.random() * 2 - 1) * 60,
+        screenY: window.innerHeight / 2 + (Math.random() * 2 - 1) * 40,
+        text: '+100',
+        kill: false,
+      });
+    } else if (event.type === 'target-destroyed') {
+      const score =
+        event.variant === 'enemy'
+          ? '+150'
+          : event.variant === 'bomber'
+            ? '+250'
+            : event.variant === 'ground-target-entity'
+              ? '+100'
+              : '+100';
+      result.push({
+        screenX: window.innerWidth / 2 + (Math.random() * 2 - 1) * 80,
+        screenY: window.innerHeight / 2 + (Math.random() * 2 - 1) * 50,
+        text: score,
+        kill: true,
+      });
+    }
+  }
+  return result;
+}
+
+/**
  * 应用引导函数
  *
  * 功能：按层装配全部子系统——键盘输入管理器、DOM HUD、机库选择
@@ -204,6 +249,9 @@ function bootstrap(): void {
       const events = world.consumeEvents();
       renderApp.handleEvents(events);
 
+      // COD 得分弹出：事件 → 得分文本 + 屏幕位置组装
+      const scorePopups = assembleScorePopups(events);
+
       hud.update({
         fps: perf.fps,
         frameMs: perf.averageFrameMs,
@@ -212,6 +260,8 @@ function bootstrap(): void {
         flight,
         lock,
         markers,
+        scorePopups,
+        weatherFlash: renderApp.getWeatherFlash(),
         events,
       });
 
@@ -249,6 +299,8 @@ function bootstrap(): void {
     world.spawnWingmen();
     // 选机完成 → 任务简报
     missionUi.showBriefing(() => {
+      // 用户手势后激活天气音频（雷声合成用）
+      renderApp.resumeWeatherAudio();
       world.mission.start();
     });
   });
