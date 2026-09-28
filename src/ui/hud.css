@@ -146,6 +146,41 @@
   }
 }
 
+/* ---------- 鼠标教练瞄准（迭代12：战雷式双标记） ---------- */
+
+/* 教练设定点环：光标位置的小圆环+中心点（战雷方向指示器风格） */
+.hud-aim-cursor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid rgba(143, 240, 201, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(143, 240, 201, 0.35), inset 0 0 6px rgba(143, 240, 201, 0.18);
+  display: none;
+  pointer-events: none;
+}
+
+/* 设定点环中心点（细小，避免与弹着点准星混淆） */
+.hud-aim-cursor::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(143, 240, 201, 0.95);
+}
+
+/* 战斗中鼠标教练激活：隐藏系统光标（HUD 设定点环替代视觉指示） */
+body.mouse-aim-cursor-hidden {
+  cursor: none;
+}
+
 @keyframes hud-cs-pulse {
   0%,
   100% {

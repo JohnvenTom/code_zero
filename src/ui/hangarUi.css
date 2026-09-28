@@ -189,3 +189,65 @@
     width: min(320px, 84vw);
   }
 }
+
+/* ---------- 输入设置面板（迭代12：鼠标教练瞄准） ---------- */
+.hangar-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(520px, calc(100vw - 48px));
+  padding: 16px 20px;
+  background: rgba(10, 18, 26, 0.92);
+  border: 1px solid rgba(140, 200, 230, 0.28);
+  border-radius: 12px;
+}
+
+.hangar-settings-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #7fe0c3;
+}
+
+.hangar-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #d7e3ea;
+  cursor: pointer;
+}
+
+.hangar-settings-toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: #7fe0c3;
+  cursor: pointer;
+}
+
+.hangar-settings-row {
+  display: grid;
+  grid-template-columns: 88px 1fr 48px;
+  align-items: center;
+  gap: 12px;
+}
+
+.hangar-settings-label {
+  font-size: 12px;
+  color: #d7e3ea;
+  opacity: 0.85;
+}
+
+.hangar-settings-row input[type='range'] {
+  width: 100%;
+  accent-color: #7fe0c3;
+  cursor: pointer;
+}
+
+.hangar-settings-value {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  color: #7fe0c3;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

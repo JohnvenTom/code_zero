@@ -1,4 +1,5 @@
 import { fighters } from '../config';
+import { saveUserSettings, userSettings } from '../core/settingsStore';
 
 /** 机库界面控制接口 */
 export interface HangarUi {
@@ -118,6 +119,10 @@ export function createHangarUi(root: HTMLElement): HangarUi {
     cardEls.set(fighter.id, card);
   }
   overlay.appendChild(cards);
+
+  // ---- 输入设置面板（鼠标教练开关 + 手感滑条，即时生效并持久化） ----
+  overlay.appendChild(createSettingsPanel());
+
   root.appendChild(overlay);
 
   return {
@@ -181,4 +186,102 @@ function appendStatBar(container: HTMLElement, label: string, ratio: number): vo
   row.appendChild(labelEl);
   row.appendChild(bar);
   container.appendChild(row);
+}
+
+/**
+ * 构建输入设置面板（迭代12：鼠标教练手感调参）
+ *
+ * 功能：生成「鼠标教练瞄准」开关 + 追踪响应/微调方向舵两条滑条——
+ * 变更即时写入 settingsStore（持久化 + 广播世界层/HUD 同步），
+ * 数值标签实时显示当前倍率；面板随机库展示，任务内可用 M 键
+ * 随时开关教练
+ * @returns 设置面板根元素
+ * 异常：无
+ * 注意事项：滑条范围与 settingsStore 的字段级校验范围一致
+ * （追踪响应 0.4..2 / 微舵 0..2），越界值由存储层钳制
+ */
+function createSettingsPanel(): HTMLElement {
+  const panel = document.createElement('div');
+  panel.className = 'hangar-settings';
+
+  const title = document.createElement('div');
+  title.className = 'hangar-settings-title';
+  title.textContent = '输入设置 · 鼠标教练瞄准';
+  panel.appendChild(title);
+
+  // 开关行：鼠标教练瞄准
+  const toggleRow = document.createElement('label');
+  toggleRow.className = 'hangar-settings-toggle';
+  const toggleBox = document.createElement('input');
+  toggleBox.type = 'checkbox';
+  toggleBox.checked = userSettings.mouseAimEnabled;
+  const toggleText = document.createElement('span');
+  toggleText.textContent = '鼠标教练瞄准（光标指哪飞哪，M 键随时开关）';
+  toggleRow.appendChild(toggleBox);
+  toggleRow.appendChild(toggleText);
+  toggleBox.addEventListener('change', () => {
+    saveUserSettings({ mouseAimEnabled: toggleBox.checked });
+  });
+  panel.appendChild(toggleRow);
+
+  // 滑条行：追踪响应（教练拉杆/滚转增益倍率）
+  panel.appendChild(
+    createSliderRow('追踪响应', 0.4, 2, 0.1, () => userSettings.pursuitResponse, (value) => {
+      saveUserSettings({ pursuitResponse: value });
+    }),
+  );
+  // 滑条行：微调方向舵（末端对准修正量）
+  panel.appendChild(
+    createSliderRow('微调方向舵', 0, 2, 0.1, () => userSettings.rudderAssist, (value) => {
+      saveUserSettings({ rudderAssist: value });
+    }),
+  );
+
+  return panel;
+}
+
+/**
+ * 构建单条「label + 滑条 + 数值」设置行
+ *
+ * @param label 设置项名称
+ * @param min 滑条下限
+ * @param max 滑条上限
+ * @param step 步长
+ * @param read 当前值读取器
+ * @param write 变更写入回调
+ * @returns 设置行元素
+ */
+function createSliderRow(
+  label: string,
+  min: number,
+  max: number,
+  step: number,
+  read: () => number,
+  write: (value: number) => void,
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'hangar-settings-row';
+  const labelEl = document.createElement('span');
+  labelEl.className = 'hangar-settings-label';
+  labelEl.textContent = label;
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = String(min);
+  slider.max = String(max);
+  slider.step = String(step);
+  slider.value = String(read());
+  const valueEl = document.createElement('span');
+  valueEl.className = 'hangar-settings-value';
+  valueEl.textContent = `×${read().toFixed(1)}`;
+  slider.addEventListener('input', () => {
+    const value = Number(slider.value);
+    if (Number.isFinite(value)) {
+      valueEl.textContent = `×${value.toFixed(1)}`;
+      write(value);
+    }
+  });
+  row.appendChild(labelEl);
+  row.appendChild(slider);
+  row.appendChild(valueEl);
+  return row;
 }

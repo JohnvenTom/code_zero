@@ -43,6 +43,10 @@ export interface RenderApp {
   handleEvents(events: readonly GameEvent[]): void;
   /** 将实体当前渲染帧位置投影为屏幕坐标（HUD 锁定框/得分弹出定位用） */
   projectEntity(entityId: number): ScreenProjection | null;
+  /** 将实体机头前向某距离处的点投影为屏幕坐标（鼠标教练弹着点准星用） */
+  projectForwardPoint(entityId: number, distance: number): ScreenProjection | null;
+  /** 屏幕像素坐标 → 世界坐标视线方向（鼠标教练瞄准反投影，写入 out 返回） */
+  screenToWorldDirection(cursorX: number, cursorY: number, out: Vector3): Vector3;
   /** 激活天气音频上下文（用户手势后调用，雷声用） */
   resumeWeatherAudio(): void;
   /** 获取屏幕白闪当前强度（HUD 天气闪屏消费；0=无闪） */
@@ -55,6 +59,8 @@ export interface RenderApp {
 
 /** 模块级复用对象：投影计算向量 */
 const _projectVec = new Vector3();
+/** 模块级复用对象：反投影计算向量 */
+const _unprojectVec = new Vector3();
 
 /** 地面爆炸判定高度（米，事件位置低于该值视为地面爆炸） */
 const GROUND_BLAST_ALTITUDE = 60;
@@ -116,6 +122,25 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
 
   /** 涡流帧数据复用数组（避免每帧分配） */
   const vortexFrames: AircraftFrame[] = [];
+
+  /**
+   * 将已就位的 _projectVec（相机投影后 NDC）组装为屏幕投影结果（私有）
+   *
+   * 功能：NDC → 屏幕像素换算 + 视锥内/后方判定，
+   * projectEntity 与 projectForwardPoint 共用
+   * @returns 屏幕投影结果
+   */
+  const buildProjection = (): ScreenProjection => {
+    const behind = _projectVec.z > 1;
+    return {
+      x: (_projectVec.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-_projectVec.y * 0.5 + 0.5) * window.innerHeight,
+      onScreen: !behind && Math.abs(_projectVec.x) <= 1 && Math.abs(_projectVec.y) <= 1,
+      ndcX: _projectVec.x,
+      ndcY: _projectVec.y,
+      behind,
+    };
+  };
 
   return {
     /**
@@ -256,15 +281,58 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
         return null;
       }
       _projectVec.copy(obj.position).project(camera);
-      const behind = _projectVec.z > 1;
-      return {
-        x: (_projectVec.x * 0.5 + 0.5) * window.innerWidth,
-        y: (-_projectVec.y * 0.5 + 0.5) * window.innerHeight,
-        onScreen: !behind && Math.abs(_projectVec.x) <= 1 && Math.abs(_projectVec.y) <= 1,
-        ndcX: _projectVec.x,
-        ndcY: _projectVec.y,
-        behind,
-      };
+      return buildProjection();
+    },
+
+    /**
+     * 将实体机头前向某距离处的点投影为屏幕坐标
+     *
+     * 功能：取实体渲染对象的插值位姿，计算沿机头方向（本体 -Z）
+     * 前向 distance 米处的世界点并投影为屏幕像素坐标——
+     * 鼠标教练模式下 HUD 弹着点准星的定位源（机头方向 ≠ 屏幕中心，
+     * 相机存在 height/lookAhead/rollFollow 固有偏差）
+     * @param entityId 模拟实体 ID
+     * @param distance 前向距离（米，建议远大于相机偏移量）
+     * @returns 屏幕投影；实体无渲染对象时返回 null
+     * 异常：无
+     * 注意事项：须在 render() 之后调用（插值位姿已同步）
+     */
+    projectForwardPoint(entityId, distance) {
+      const obj = bridge.getObject(entityId);
+      if (obj === undefined) {
+        return null;
+      }
+      _projectVec
+        .set(0, 0, -1)
+        .applyQuaternion(obj.quaternion)
+        .multiplyScalar(distance)
+        .add(obj.position)
+        .project(camera);
+      return buildProjection();
+    },
+
+    /**
+     * 屏幕像素坐标 → 世界坐标视线方向
+     *
+     * 功能：将光标屏幕坐标换算为 NDC 后经相机反投影，返回从相机
+     * 位置出发穿过该像素的世界单位方向向量——鼠标教练瞄准方向
+     * 的来源（core 层 InputManager 经注入的提供者间接调用）
+     * @param cursorX 光标横坐标（像素）
+     * @param cursorY 光标纵坐标（像素）
+     * @param out 输出向量（调用方持有，复用避免每固定步分配）
+     * @returns 世界坐标单位方向（即 out 本身）
+     * 异常：无
+     * 注意事项：使用上一渲染帧的相机矩阵（固定步先于渲染执行），
+     * 一帧滞后对瞄准无可感知影响
+     */
+    screenToWorldDirection(cursorX, cursorY, out) {
+      _unprojectVec.set(
+        (cursorX / window.innerWidth) * 2 - 1,
+        -(cursorY / window.innerHeight) * 2 + 1,
+        0.5,
+      );
+      _unprojectVec.unproject(camera).sub(camera.position).normalize();
+      return out.copy(_unprojectVec);
     },
 
     /**

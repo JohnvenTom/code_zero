@@ -1,5 +1,11 @@
+import { Vector3 } from 'three';
 import { GameLoop } from './core/gameLoop';
 import { InputManager } from './core/input';
+import {
+  loadUserSettings,
+  onUserSettingsChanged,
+  userSettings,
+} from './core/settingsStore';
 import { PerfProbe } from './diagnostics/perf';
 import { createRenderApp, type RenderApp } from './render';
 import { setPlayerFighter } from './render/objects/meshes';
@@ -171,7 +177,10 @@ function assembleScorePopups(events: readonly GameEvent[]): HudScorePopup[] {
  * 全目标屏幕标记（含出屏边缘箭头与来袭导弹标记）每帧组装
  */
 function bootstrap(): void {
-  // ---- core 层：键盘输入管理器（DOM → 纯数据输入快照） ----
+  // ---- core 层：用户设置加载（localStorage → 内存单例） ----
+  loadUserSettings();
+
+  // ---- core 层：键盘+鼠标输入管理器（DOM → 纯数据输入快照） ----
   const input = new InputManager();
 
   // ---- simulation 层：模拟世界（玩家战机在机库选择后生成） ----
@@ -207,6 +216,22 @@ function bootstrap(): void {
   // ---- diagnostics 层：性能探针 ----
   const perf = new PerfProbe();
 
+  // ---- 鼠标教练装配：光标屏幕坐标 → 世界瞄准方向（纯数据进模拟层） ----
+  /** 瞄准方向复用向量（提供者每固定步覆写，同步消费不逃逸） */
+  const aimDir = new Vector3();
+  input.setAimDirProvider((cursorX, cursorY) =>
+    renderApp.screenToWorldDirection(cursorX, cursorY, aimDir),
+  );
+  // 设置页滑条 → 世界层教练调参（实时生效）
+  const applyInstructorTuning = (): void => {
+    world.tuneInstructor({
+      pursuitResponse: userSettings.pursuitResponse,
+      rudderAssist: userSettings.rudderAssist,
+    });
+  };
+  applyInstructorTuning();
+  onUserSettingsChanged(applyInstructorTuning);
+
   /** 结算界面是否已弹出（任务结束帧一次性触发） */
   let resultShown = false;
 
@@ -224,6 +249,24 @@ function bootstrap(): void {
 
       const flight = world.getPlayerFlightData();
       const missionStatus = world.mission.getStatus();
+
+      // 鼠标教练状态：设定点环定位 + 战斗中隐藏系统光标（自定义环替代）
+      const mouseAim = input.getMouseAimState();
+      document.body.classList.toggle(
+        'mouse-aim-cursor-hidden',
+        mouseAim.active && missionStatus === 'active',
+      );
+      // 弹着点准星：机头方向前向点投影（教练激活时空中的可定位准星；
+      // 与设定点分离可视化"机头还在转过来"的收敛过程）
+      let noseAim: { x: number; y: number } | null = null;
+      if (mouseAim.active && flight !== null && flight.alive && !flight.onGround) {
+        const player = world.getPlayer();
+        const noseProjection =
+          player !== null ? renderApp.projectForwardPoint(player.id, 4000) : null;
+        if (noseProjection !== null && noseProjection.onScreen) {
+          noseAim = { x: noseProjection.x, y: noseProjection.y };
+        }
+      }
 
       // 锁定框定位：锁定目标经渲染层投影为屏幕坐标（含机型名与距离）
       let lock: HudLockInfo | null = null;
@@ -261,6 +304,11 @@ function bootstrap(): void {
         lock,
         markers,
         scorePopups,
+        mouseAim:
+          mouseAim.active && missionStatus === 'active'
+            ? { cursorX: mouseAim.cursorX, cursorY: mouseAim.cursorY }
+            : null,
+        noseAim,
         weatherFlash: renderApp.getWeatherFlash(),
         events,
       });

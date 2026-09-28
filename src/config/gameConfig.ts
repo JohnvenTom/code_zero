@@ -225,6 +225,41 @@ export interface InputConfig {
     /** 坠毁后重置到跑道（Backspace） */
     readonly reset: string;
   };
+  /** 鼠标教练瞄准（迭代12：战雷式虚拟教练，M 键开关） */
+  readonly mouse: MouseAimConfig;
+}
+
+/** 鼠标教练瞄准配置（迭代12：战雷式虚拟教练） */
+export interface MouseAimConfig {
+  /** 首次进入是否默认开启鼠标教练（玩家可用开关键随时切换并持久化） */
+  readonly enabledByDefault: boolean;
+  /** 鼠标教练开关键（KeyboardEvent.code） */
+  readonly toggleKey: string;
+  /** 瞄准死区（rad）：机头与瞄准方向夹角小于该值时教练松杆（防末端抖动） */
+  readonly aimDeadzoneRad: number;
+  /** 拉杆增益（杆量/弧度误差）：机体系仰角误差 → 俯仰杆量 */
+  readonly pitchGain: number;
+  /** 转弯保持增益（杆量/弧度）：压坡且有方位误差时的持续拉杆分量
+   *  （坡度×方位误差的乘积项——防"光压坡不拉杆"的死锁平衡点，
+   *  方位误差闭合后该项自动消失） */
+  readonly turnSustainGain: number;
+  /** 滚转增益（杆量/弧度坡度差）：目标坡度-当前坡度 → 滚转杆量 */
+  readonly rollGain: number;
+  /** 教练自动转弯允许的最大目标坡度（rad） */
+  readonly maxBankRad: number;
+  /** 下视坡度延伸系数：目标低于机头时最大坡度按仰角差延伸
+   *  （滚过 90° 侧立——拉杆产生向下转向分量，避免仰角大幅过冲后
+   *  再靠受限推杆慢慢修回；总坡度钳制在 2.4 rad ≈ 137°） */
+  readonly downBankExtension: number;
+  /** 推杆杆量下限（0..1，负值=允许推杆；推杆受负 G 限约束故幅度收敛） */
+  readonly pushStickLimit: number;
+  /** 微舵启用阈值（rad）：世界系方位误差小于该值时叠加方向舵做末端修正 */
+  readonly rudderThresholdRad: number;
+  /** 微舵增益（杆量/弧度机体系方位误差；闭环收敛速率 ≈ yawRateMax×
+   *  该增益×微舵上限，决定最后几度的收尾快慢） */
+  readonly rudderGain: number;
+  /** 微舵基础杆量上限（0..1，设置页可再缩放） */
+  readonly rudderAuthority: number;
 }
 
 /** 机炮配置（Task 6.1） */
@@ -596,6 +631,22 @@ export const gameConfig = {
       flare: 'KeyE',
       wingmanCommand: 'KeyC',
       reset: 'Backspace',
+    },
+    /** 鼠标教练瞄准（迭代12：光标=航向设定点，教练自动协调滚转+拉杆追踪；
+     *  方向键按住时教练让位=手动接管，左键开火/滚轮换武器/右键切目标） */
+    mouse: {
+      enabledByDefault: true,
+      toggleKey: 'KeyM',
+      aimDeadzoneRad: 0.02,
+      pitchGain: 2.2,
+      turnSustainGain: 2,
+      rollGain: 2.4,
+      maxBankRad: 1.22,
+      downBankExtension: 1.2,
+      pushStickLimit: 0.55,
+      rudderThresholdRad: 0.12,
+      rudderGain: 6,
+      rudderAuthority: 0.5,
     },
   } satisfies InputConfig,
   /** 机炮 */

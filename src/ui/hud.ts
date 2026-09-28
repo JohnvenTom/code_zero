@@ -78,6 +78,10 @@ export interface HudStats {
   readonly markers: readonly HudTargetMarker[];
   /** 本帧得分弹出列表（命中/击坠，投影定位） */
   readonly scorePopups: readonly HudScorePopup[];
+  /** 鼠标教练瞄准状态（null=未激活或非战斗：隐藏设定点环、准星回屏幕中心） */
+  readonly mouseAim: { readonly cursorX: number; readonly cursorY: number } | null;
+  /** 机头弹着点屏幕投影（鼠标教练激活时空中的可定位准星锚点；null=准星回屏幕中心） */
+  readonly noseAim: { readonly x: number; readonly y: number } | null;
   /** 天气屏幕白闪强度（0..1，闪电时） */
   readonly weatherFlash: number;
   /** 本帧消费的模拟事件（命中/击毁/坠毁/导弹/干扰弹/锁定） */
@@ -182,6 +186,11 @@ export function createHud(root: HTMLElement): Hud {
   const hitmarker = document.createElement('div');
   hitmarker.className = 'hud-hitmarker';
   root.appendChild(hitmarker);
+
+  // ---- 鼠标教练设定点环（光标位置的小圆环：教练追踪目标，默认隐藏） ----
+  const aimCursor = document.createElement('div');
+  aimCursor.className = 'hud-aim-cursor';
+  root.appendChild(aimCursor);
 
   // ---- 击毁提示（准星上方短暂浮现） ----
   const killToast = document.createElement('div');
@@ -351,11 +360,11 @@ export function createHud(root: HTMLElement): Hud {
   crashPanel.appendChild(crashHint);
   root.appendChild(crashPanel);
 
-  // ---- 底部操作提示（迭代11 键位重构后文案） ----
+  // ---- 底部操作提示（迭代12 鼠标教练文案） ----
   const chip = document.createElement('div');
   chip.className = 'hud-hint-chip';
   chip.textContent =
-    'W/S 油门 · ↑↓ 俯仰 · ←→ 滚转 · A/D 踩舵 · 空格 开火 · R 换武器 · X 切目标 · C 僚机 · E 干扰弹 · Backspace 重置';
+    '鼠标瞄准 · 左键 开火 · 滚轮 换武器 · 右键 切目标 · 方向键 手动接管 · W/S 油门 · C 僚机 · E 干扰弹 · M 鼠标教练开关 · Backspace 重置';
   root.appendChild(chip);
 
   // ---- WebGL 上下文丢失遮罩（默认隐藏） ----
@@ -429,6 +438,25 @@ export function createHud(root: HTMLElement): Hud {
         crosshair.style.setProperty('--cs-spread', `${spread.toFixed(1)}px`);
         crosshair.style.setProperty('--cs-jitter', `${jitter.toFixed(2)}px`);
 
+        // 鼠标教练双标记：弹着点准星定位到机头前向投影（与设定点环分离
+        // 表示机头收敛进度，重合即对准）；教练关闭/无投影时回屏幕中心
+        if (stats.noseAim !== null) {
+          crosshair.style.left = `${stats.noseAim.x.toFixed(0)}px`;
+          crosshair.style.top = `${stats.noseAim.y.toFixed(0)}px`;
+          crosshair.classList.add('is-aim-tracked');
+        } else {
+          crosshair.style.left = '';
+          crosshair.style.top = '';
+          crosshair.classList.remove('is-aim-tracked');
+        }
+        if (stats.mouseAim !== null) {
+          aimCursor.style.display = 'block';
+          aimCursor.style.left = `${stats.mouseAim.cursorX.toFixed(0)}px`;
+          aimCursor.style.top = `${stats.mouseAim.cursorY.toFixed(0)}px`;
+        } else {
+          aimCursor.style.display = 'none';
+        }
+
         gReadout.classList.toggle('is-high', flight.gLoad >= G_WARN_THRESHOLD);
         gReadout.classList.toggle('is-negative', flight.gLoad < -0.5);
         hpValue.classList.toggle('is-low', flight.hp <= flight.hpMax * 0.3);
@@ -461,6 +489,16 @@ export function createHud(root: HTMLElement): Hud {
         crosshair.classList.remove('is-locking', 'is-locked');
         crosshair.style.setProperty('--cs-spread', '26px');
         crosshair.style.setProperty('--cs-jitter', '0px');
+      }
+
+      // 鼠标教练标记兜底：flight 为 null（机库/简报）时同样复位
+      if (stats.noseAim === null) {
+        crosshair.style.left = '';
+        crosshair.style.top = '';
+        crosshair.classList.remove('is-aim-tracked');
+      }
+      if (stats.mouseAim === null) {
+        aimCursor.style.display = 'none';
       }
 
       // 全目标屏幕标记：池化更新标记框/边缘箭头/来袭导弹

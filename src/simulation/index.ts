@@ -10,6 +10,7 @@ export * from './entity';
 export * from './components';
 export * from './events';
 export * from './flightModel';
+export * from './instructor';
 export * from './gunSystem';
 export * from './missileSystem';
 export * from './flareSystem';

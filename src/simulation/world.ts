@@ -14,6 +14,12 @@ import {
 } from './components';
 import type { GameEvent } from './events';
 import { integrateAircraftFlight, type ControlInput } from './flightModel';
+import {
+  computeInstructorStick,
+  DEFAULT_INSTRUCTOR_TUNING,
+  type InstructorStick,
+  type InstructorTuning,
+} from './instructor';
 import { updateGun, updateProjectiles } from './gunSystem';
 import { updateEnemyAI } from './enemyAI';
 import { updateWingmenAI } from './wingmanAI';
@@ -45,6 +51,9 @@ const reloadCfg = gameConfig.weaponReload;
 
 /** 僚机指令循环顺序 */
 const WINGMAN_COMMAND_CYCLE: readonly WingmanCommand[] = ['formation', 'attack', 'cover'];
+
+/** 教练杆量输出复用对象（每固定步覆写，同步消费不逃逸） */
+const _instructorStick: InstructorStick = { pitch: 0, roll: 0, yaw: 0 };
 
 /** 玩家出生点（跑道南端，机头朝 -Z 即跑道延伸方向） */
 const PLAYER_SPAWN = new Vector3(0, flightCfg.gearHeight, 600);
@@ -225,6 +234,53 @@ export class SimulationWorld {
 
   /** 敌机机型名轮询计数器（生成敌机时依次取 typeNames） */
   private enemyTypeIndex = 0;
+
+  /** 鼠标教练手感调参（设置页滑条实时更新，main 层注入） */
+  private instructorTuning: InstructorTuning = DEFAULT_INSTRUCTOR_TUNING;
+
+  /**
+   * 更新鼠标教练手感调参
+   *
+   * 功能：设置页滑条变更时由 main 层调用，后续固定步教练杆量
+   * 立即按新倍率计算（无需重开任务）
+   * @param tuning 新调参（追踪响应/微舵倍率）
+   * @returns void
+   */
+  tuneInstructor(tuning: InstructorTuning): void {
+    this.instructorTuning = tuning;
+  }
+
+  /**
+   * 解析玩家实际控制输入（私有，教练/键盘融合点）
+   *
+   * 功能：鼠标教练激活时用教练杆量替换三轴输入——激活条件：
+   * 输入携带瞄准方向 且 键盘三轴全零（方向键按住=手动接管，
+   * 教练整体让位）且 玩家在空中（地面滑跑仅俯仰有效，教练不参与）；
+   * 其余通道（油门/开火/切武器等）原样保留。
+   * 教练输出走与键盘相同的杆量通道，smoothStick/G限/速度权限
+   * 等全部下游保护继续生效。
+   * @param player 玩家实体（读取空中/地面状态）
+   * @param input 本固定步玩家输入快照
+   * @returns 实际参与飞行积分的输入（教练接管时为替换三轴后的副本）
+   */
+  private resolvePlayerInput(player: SimEntity, input: ControlInput): ControlInput {
+    const keyboardActive = input.pitch !== 0 || input.roll !== 0 || input.yaw !== 0;
+    if (
+      !input.mouseAim ||
+      input.aimDir == null ||
+      keyboardActive ||
+      (player.aircraft?.onGround ?? false)
+    ) {
+      return input;
+    }
+    computeInstructorStick(player.quaternion, input.aimDir, this.instructorTuning, _instructorStick);
+    return {
+      ...input,
+      pitch: _instructorStick.pitch,
+      roll: _instructorStick.roll,
+      yaw: _instructorStick.yaw,
+    };
+  }
 
   /**
    * 生成玩家战机（按所选机型装配属性与武器）
@@ -523,9 +579,10 @@ export class SimulationWorld {
       this.resetPlayer();
     }
 
-    // 2) 玩家飞行积分（撞地死亡立即播报并置标记，被击落路径由步骤 9 补充检查）
+    // 2) 玩家飞行积分（鼠标教练接管判定后积分；撞地死亡立即播报并置标记，
+    //    被击落路径由步骤 9 补充检查）
     if (player !== null && player.alive) {
-      integrateAircraftFlight(player, input, dt);
+      integrateAircraftFlight(player, this.resolvePlayerInput(player, input), dt);
       if (!player.alive) {
         pushEvent({ type: 'player-crash', position: player.position.clone() });
         this.playerDeathReported = true;

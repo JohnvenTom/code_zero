@@ -31,6 +31,11 @@ export interface ControlInput {
   readonly wingmanCommand: boolean;
   /** 是否请求重置（边沿触发，仅单个固定步为 true；仅玩家使用） */
   readonly reset: boolean;
+  /** 鼠标教练瞄准是否激活（仅玩家：M 键开关 ×设置页；教练层据此接管杆量） */
+  readonly mouseAim?: boolean;
+  /** 鼠标瞄准方向（世界坐标单位向量，渲染层由光标反投影；null=不可用。
+   *  仅玩家使用；自由光标在屏幕内+追尾相机，天然约束在机头前视锥附近 */
+  readonly aimDir?: Vector3 | null;
 }
 
 /** 飞行基准配置的模块级引用（通用参数：油门速率/输入响应/失速特性/地面参数） */
