@@ -16,6 +16,9 @@ export interface ChaseCameraController {
    * @param speed 目标速度标量（m/s，驱动 FOV 速度感）
    * @param gLoad 目标当前过载（G，驱动机动镜头抖动）
    * @param dt 本渲染帧间隔（秒）
+   * @param aimDir 鼠标瞄准方向（世界坐标；传非 null 表示教练激活）。
+   *  迭代12：教练激活时相机视线与机头严格平行（光标屏幕偏移=瞄准
+   *  角差的无动态测量）；关闭时平滑回退原机头前向提前量注视
    */
   update(
     targetPosition: Vector3,
@@ -23,6 +26,7 @@ export interface ChaseCameraController {
     speed: number,
     gLoad: number,
     dt: number,
+    aimDir?: Vector3 | null,
   ): void;
 }
 
@@ -32,6 +36,10 @@ const _offset = new Vector3();
 const _desired = new Vector3();
 /** 模块级复用对象：注视目标点 */
 const _lookTarget = new Vector3();
+/** 模块级复用对象：原注视方向（机头前向提前量，从相机位置出发） */
+const _oldLookDir = new Vector3();
+/** 模块级复用对象：混合后的注视方向（平行机头过渡） */
+const _lookDir = new Vector3();
 /** 模块级复用对象：前向注视偏移 */
 const _ahead = new Vector3();
 /** 模块级复用对象：机体 up 向量 */
@@ -57,9 +65,13 @@ const _cameraUp = new Vector3();
 export function createChaseCamera(camera: PerspectiveCamera): ChaseCameraController {
   let firstUpdate = true;
   let currentFov = gameConfig.camera.fov;
+  /** 平行视线混合权重 0..1（教练开→1 平行机头 / 关→0 原注视点） */
+  let noseAlignBlend = 0;
+  /** 首次教练激活直接吸附平行视线（任务开始于地面，跳过过渡避免初始俯仰瞬态） */
+  let noseAlignInitialized = false;
 
   return {
-    update(targetPosition, targetQuaternion, speed, gLoad, dt) {
+    update(targetPosition, targetQuaternion, speed, gLoad, dt, aimDir) {
       const dtc = Math.min(Math.max(dt, 0), 0.1);
 
       // 高速相机修正：速度感 FOV 增幅收敛（fovBoost 6°上限）+
@@ -99,9 +111,36 @@ export function createChaseCamera(camera: PerspectiveCamera): ChaseCameraControl
       // 离地净空钳制（贴地机动时避免相机穿地）
       camera.position.y = Math.max(camera.position.y, chaseCfg.minGroundClearance);
 
-      // 注视点：机头前方提前量
-      _ahead.set(0, 0, -chaseCfg.lookAhead).applyQuaternion(targetQuaternion);
-      _lookTarget.copy(targetPosition).add(_ahead);
+      // ---- 注视方向（迭代12）：教练激活时相机视线与机头严格平行 ----
+      // 平行视线让"光标屏幕偏移 = 瞄准角差"成为零动态、零偏置的测量：
+      // 相机姿态只随机头（位置滞后不影响过光标射线的方向），不存在
+      // "机头追瞄准→相机追机头→瞄准随机头"的追逐环——
+      // 光标居中 = 瞄准=机头 = 直线飞行（零漂移）；
+      // 光标偏移 = 恒定角差 = 平稳持续转弯（战雷"光标指哪往哪转"）。
+      // 机头在画面中略偏下居中（后上视角固有几何，战雷同款构图）。
+      // 教练关闭时按 noseAlignBlend 平滑回退原"机头前向提前量"注视
+      _ahead.set(0, 0, -1).applyQuaternion(targetQuaternion);
+      const aimActive = aimDir !== undefined && aimDir !== null;
+      if (aimActive && !noseAlignInitialized) {
+        // 首次激活（任务开始）直接到位：混合过渡期相机带旧注视偏置，
+        // 会给教练一个瞬态向下误差（松手缓降的来源）
+        noseAlignBlend = 1;
+        noseAlignInitialized = true;
+      }
+      const targetBlend = aimActive ? 1 : 0;
+      noseAlignBlend += (targetBlend - noseAlignBlend) * Math.min(1, chaseCfg.noseAlignLag * dtc);
+      if (noseAlignBlend > 0.001) {
+        // 原注视方向（飞机前方提前量，从相机位置望向该点）→ 平行机头方向
+        _oldLookDir
+          .copy(targetPosition)
+          .addScaledVector(_ahead, chaseCfg.lookAhead)
+          .sub(camera.position)
+          .normalize();
+        _lookDir.copy(_oldLookDir).lerp(_ahead, noseAlignBlend).normalize();
+        _lookTarget.copy(camera.position).addScaledVector(_lookDir, 1000);
+      } else {
+        _lookTarget.copy(targetPosition).addScaledVector(_ahead, chaseCfg.lookAhead);
+      }
 
       // up 向量：世界 up 与机体 up 混合，滚转时镜头部分跟随倾斜
       _aircraftUp.set(0, 1, 0).applyQuaternion(targetQuaternion);

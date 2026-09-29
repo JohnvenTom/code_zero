@@ -41,6 +41,9 @@ export interface ChaseCameraConfig {
   readonly fovBoost: number;
   /** 相机 up 向机体 up 的混合系数（0=始终水平，1=完全跟随滚转） */
   readonly rollFollow: number;
+  /** 鼠标教练视线平行过渡速率（1/s，迭代12：教练开/关时相机注视在
+   *  原前向提前量与机头平行视线间的混合过渡快慢，避免切换跳镜） */
+  readonly noseAlignLag: number;
   /** 相机离地最低净空（米） */
   readonly minGroundClearance: number;
   /** 开始触发镜头抖动的 G 值阈值 */
@@ -536,6 +539,7 @@ export const gameConfig = {
       fovLag: 2.5,
       fovBoost: 16,
       rollFollow: 0.35,
+      noseAlignLag: 4,
       minGroundClearance: 3,
       shakeGThreshold: 3.5,
       shakeAmount: 0.7,
@@ -638,9 +642,9 @@ export const gameConfig = {
       enabledByDefault: true,
       toggleKey: 'KeyM',
       aimDeadzoneRad: 0.02,
-      pitchGain: 2.2,
-      turnSustainGain: 2,
-      rollGain: 2.4,
+      pitchGain: 2.6,
+      turnSustainGain: 2.2,
+      rollGain: 3.2,
       maxBankRad: 1.22,
       downBankExtension: 1.2,
       pushStickLimit: 0.55,

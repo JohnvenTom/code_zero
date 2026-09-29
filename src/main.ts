@@ -245,13 +245,20 @@ function bootstrap(): void {
     },
     render: (alpha, frameDt) => {
       perf.update(frameDt);
-      renderApp.render(world, alpha);
+
+      // 鼠标教练瞄准方向（光标反投影）：供追尾相机朝鼠标平移注视
+      // （与固定步采样共用同一复用向量——同步消费不逃逸）
+      const mouseAim = input.getMouseAimState();
+      const aimRay =
+        mouseAim.active && world.getPlayer() !== null
+          ? renderApp.screenToWorldDirection(mouseAim.cursorX, mouseAim.cursorY, aimDir)
+          : null;
+      renderApp.render(world, alpha, aimRay);
 
       const flight = world.getPlayerFlightData();
       const missionStatus = world.mission.getStatus();
 
-      // 鼠标教练状态：设定点环定位 + 战斗中隐藏系统光标（自定义环替代）
-      const mouseAim = input.getMouseAimState();
+      // 战斗中隐藏系统光标（自定义设定点环替代视觉指示）
       document.body.classList.toggle(
         'mouse-aim-cursor-hidden',
         mouseAim.active && missionStatus === 'active',

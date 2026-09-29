@@ -37,8 +37,14 @@ export interface ScreenProjection {
 
 /** 渲染应用统一接口（由主循环每帧驱动） */
 export interface RenderApp {
-  /** 渲染一帧：先同步实体插值状态，再驱动追尾相机，最后绘制场景 */
-  render(world: SimulationWorld, alpha: number): void;
+  /**
+   * 渲染一帧：先同步实体插值状态，再驱动追尾相机，最后绘制场景
+   * @param world 模拟世界
+   * @param alpha 插值系数
+   * @param aimDir 鼠标瞄准方向（世界坐标，光标反投影；null=教练关闭）——
+   *  迭代12：追尾相机按 aimFollow 比例朝该方向平移注视（镜头跟鼠标）
+   */
+  render(world: SimulationWorld, alpha: number, aimDir?: Vector3 | null): void;
   /** 提交本帧模拟事件（渲染层消费为战斗特效：爆炸/火花等） */
   handleEvents(events: readonly GameEvent[]): void;
   /** 将实体当前渲染帧位置投影为屏幕坐标（HUD 锁定框/得分弹出定位用） */
@@ -148,8 +154,9 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
      *
      * @param world 模拟世界（读取实体插值状态与玩家引用）
      * @param alpha 插值系数 ∈ [0,1)
+     * @param aimDir 鼠标瞄准方向（null=教练关闭，回退纯机头注视）
      */
-    render(world, alpha) {
+    render(world, alpha, aimDir) {
       const now = performance.now();
       const frameDt = Math.min((now - lastFrameMs) / 1000, 0.1);
       lastFrameMs = now;
@@ -194,7 +201,8 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
       }
       vortices.update(vortexFrames);
 
-      // 追尾相机：读取玩家插值位姿与飞行状态（坠毁后玩家对象被移除，相机保持原位）
+      // 追尾相机：读取玩家插值位姿与飞行状态（坠毁后玩家对象被移除，相机保持原位）；
+      // 鼠标教练激活时把瞄准方向传入（镜头按 aimFollow 朝鼠标平移注视）
       const player = world.getPlayer();
       if (player !== null && player.aircraft !== undefined) {
         const playerObject = bridge.getObject(player.id);
@@ -205,6 +213,7 @@ export function createRenderApp(options: RenderAppOptions): RenderApp {
             player.aircraft.speed,
             player.aircraft.gLoad,
             frameDt,
+            aimDir,
           );
         }
       }
